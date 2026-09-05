@@ -15,6 +15,7 @@ import { SettlementStatus } from "../components/SettlementStatus";
 import { VerdictPicker } from "../components/VerdictPicker";
 import { hashNotes } from "../sign/notes";
 import { previewAttestation } from "../sign/preview";
+import { describeError } from "../sign/runSign";
 import type { OrderForSigning } from "../sign/sign";
 import type { SignFlow } from "../sign/useSignFlow";
 
@@ -24,24 +25,38 @@ export function SignScreen({
   order,
   artifactText,
   flow,
+  initialDefectDraft = "",
 }: {
   mode: ChainMode;
   expertAccountId: string;
   order: OrderForSigning;
   artifactText: string | null;
   flow: SignFlow;
+  /** For tests: a defect code typed but not yet added. */
+  initialDefectDraft?: string;
 }) {
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [defects, setDefects] = useState<readonly string[]>([]);
+  const [defectDraft, setDefectDraft] = useState(initialDefectDraft);
   const [notes, setNotes] = useState("");
   const [notesHash, setNotesHash] = useState<string | null>(null);
+  const [hashError, setHashError] = useState<string | null>(null);
 
   // The hash the screen shows is the hash that gets published: same function.
   useEffect(() => {
     let live = true;
-    void hashNotes(notes).then(({ hash }) => {
-      if (live) setNotesHash(hash);
-    });
+    hashNotes(notes).then(
+      ({ hash }) => {
+        if (!live) return;
+        setNotesHash(hash);
+        setHashError(null);
+      },
+      (error: unknown) => {
+        if (!live) return;
+        setNotesHash(null);
+        setHashError(describeError(error));
+      },
+    );
     return () => {
       live = false;
     };
@@ -56,7 +71,16 @@ export function SignScreen({
   );
 
   const locked = flow.status.kind !== "idle" && flow.status.kind !== "error";
-  const ready = verdict !== null && preview !== null && preview.body !== null && !locked;
+
+  // Why the button is disabled, in the order the expert would fix things.
+  const blockers: string[] = [];
+  if (verdict === null) blockers.push("Pick a verdict.");
+  if (notes.trim() === "") blockers.push("Write your notes. Only their hash is published, but a review without them is not a review.");
+  if (defectDraft.trim() !== "") blockers.push("Add or clear the defect code you typed.");
+  if (hashError !== null) blockers.push(hashError);
+  if (preview !== null) blockers.push(...preview.problems);
+
+  const ready = !locked && blockers.length === 0 && preview !== null && preview.body !== null;
 
   return (
     <main className="mx-auto grid max-w-3xl gap-5 px-4 py-8">
@@ -91,7 +115,13 @@ export function SignScreen({
           <CardDescription>Short structured codes. The reasoning goes in the notes.</CardDescription>
         </CardHeader>
         <CardContent>
-          <DefectsEditor defects={defects} onChange={setDefects} disabled={locked} />
+          <DefectsEditor
+            defects={defects}
+            onChange={setDefects}
+            draft={defectDraft}
+            onDraftChange={setDefectDraft}
+            disabled={locked}
+          />
         </CardContent>
       </Card>
 
@@ -120,13 +150,20 @@ export function SignScreen({
             size="lg"
             disabled={!ready}
             onClick={() => {
-              if (verdict !== null) void flow.sign({ order, verdict, defects, notes });
+              if (ready && verdict !== null) void flow.sign({ order, verdict, defects, notes });
             }}
           >
             {flow.status.kind === "signing"
               ? "Publishing…"
               : `Sign and publish from ${expertAccountId}`}
           </Button>
+          {!locked && blockers.length > 0 && (
+            <ul className="text-center text-xs text-muted-foreground">
+              {blockers.map((blocker) => (
+                <li key={blocker}>{blocker}</li>
+              ))}
+            </ul>
+          )}
           <p className="text-center text-xs text-muted-foreground">
             Your account signs this HCS message and nothing else. It is never a schedule key.
           </p>
@@ -140,6 +177,7 @@ export function SignScreen({
           expertAccountId={expertAccountId}
           signed={flow.status.signed}
           settlement={flow.settlement}
+          platformIssue={flow.platformIssue}
           onCheckAgain={flow.checkAgain}
         />
       )}
