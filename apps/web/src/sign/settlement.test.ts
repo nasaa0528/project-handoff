@@ -3,6 +3,7 @@ import type { TransactionRecord } from "@handoff/schema";
 import {
   abortableSleep,
   initialSettlementState,
+  resumedSettlementState,
   watchSettlement,
   type PayoutLocator,
   type SettlementReader,
@@ -169,6 +170,7 @@ describe("watchSettlement", () => {
       payoutTransactionId: null,
       payout: null,
       failure: null,
+      lastReadError: null,
     });
   });
 });
@@ -185,5 +187,111 @@ describe("abortableSleep", () => {
     const controller = new AbortController();
     controller.abort();
     await abortableSleep(60_000, controller.signal);
+  });
+});
+
+describe("watchSettlement under a failing mirror node", () => {
+  it("treats a rejected read as not yet, keeps reading, and carries the error", async () => {
+    let calls = 0;
+    const reader: SettlementReader = {
+      async getTransaction(transactionId) {
+        calls += 1;
+        if (calls === 2) throw new Error("503 from the mirror node");
+        return calls >= 3 ? success(transactionId) : null;
+      },
+    };
+    const c = clock();
+    const states: SettlementState[] = [];
+
+    const final = await watchSettlement(
+      { attestationTransactionId: ATT, reader, payout: locatorAfter(0, PAY), onChange: (s) => states.push(s) },
+      { now: c.now, sleep: c.sleep },
+    );
+
+    expect(final.phase).toBe("settled");
+    expect(final.lastReadError).toBeNull();
+    const errored = states.find((s) => s.lastReadError !== null);
+    expect(errored?.lastReadError).toBe("503 from the mirror node");
+    expect(errored?.phase).toBe("waiting-for-mirror");
+  });
+
+  it("treats a rejected locate the same way", async () => {
+    const { reader } = scripted({ [ATT]: [success(ATT)], [PAY]: [success(PAY)] });
+    let asks = 0;
+    const payout: PayoutLocator = {
+      async locate() {
+        asks += 1;
+        if (asks === 1) throw new Error("verifier down");
+        return PAY;
+      },
+    };
+    const c = clock();
+
+    const final = await watchSettlement({ attestationTransactionId: ATT, reader, payout }, { now: c.now, sleep: c.sleep });
+
+    expect(final.phase).toBe("settled");
+    expect(asks).toBe(2);
+  });
+
+  it("stalls, never spins, when every read throws", async () => {
+    const reader: SettlementReader = {
+      async getTransaction() {
+        throw new Error("network down");
+      },
+    };
+    const c = clock();
+
+    const final = await watchSettlement(
+      { attestationTransactionId: ATT, reader, payout: locatorAfter(0, PAY) },
+      { now: c.now, sleep: c.sleep, giveUpAfterMs: 10_000 },
+    );
+
+    expect(final.phase).toBe("stalled");
+    expect(final.lastReadError).toBe("network down");
+  });
+});
+
+describe("resuming a watch", () => {
+  it("keeps a confirmed attestation and a located payout id, and reads only what is unknown", async () => {
+    const { reader, calls } = scripted({ [PAY]: [success(PAY)] });
+    const payout = locatorAfter(0, PAY);
+    const stalled: SettlementState = {
+      ...initialSettlementState(ATT),
+      phase: "stalled",
+      elapsedMs: 90_000,
+      slow: true,
+      attestation: success(ATT),
+      payoutTransactionId: PAY,
+    };
+    const phases: string[] = [];
+
+    const final = await watchSettlement(
+      { attestationTransactionId: ATT, reader, payout, resumeFrom: stalled, onChange: (s) => phases.push(s.phase) },
+      { now: () => 0, sleep: async () => {} },
+    );
+
+    expect(phases[0]).toBe("attested");
+    expect(final.phase).toBe("settled");
+    expect(calls).toEqual([PAY]);
+    expect(payout.calls).toBe(0);
+  });
+
+  it("starts the clock again, so slow and stalled are judged from the retry", () => {
+    const resumed = resumedSettlementState({
+      ...initialSettlementState(ATT),
+      phase: "stalled",
+      elapsedMs: 90_000,
+      slow: true,
+      attestation: success(ATT),
+      lastReadError: "network down",
+    });
+    expect(resumed).toEqual({ ...initialSettlementState(ATT), phase: "attested", attestation: success(ATT) });
+  });
+
+  it("does not carry a failed attestation forward", () => {
+    const resumed = resumedSettlementState({ ...initialSettlementState(ATT), attestation: failed(ATT), payoutTransactionId: PAY });
+    expect(resumed.attestation).toBeNull();
+    expect(resumed.payoutTransactionId).toBeNull();
+    expect(resumed.phase).toBe("waiting-for-mirror");
   });
 });

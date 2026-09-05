@@ -49,7 +49,7 @@ const record = (transactionId: string): TransactionRecord => ({
   consensusTimestamp: "1757000006.000000000",
 });
 
-const noop = { sign: async () => {}, checkAgain: () => {} };
+const noop = { platformIssue: null, sign: async () => {}, checkAgain: () => {} };
 
 describe("SignScreen", () => {
   it("offers the sign action from the expert's own account and says which chain it is on", () => {
@@ -84,6 +84,7 @@ describe("SignScreen", () => {
       payoutTransactionId: "MOCK-tx-7",
       payout: record("MOCK-tx-7"),
       failure: null,
+      lastReadError: null,
     };
     const flow: SignFlow = {
       ...noop,
@@ -121,6 +122,7 @@ describe("SignScreen", () => {
       payoutTransactionId: payoutTx,
       payout: record(payoutTx),
       failure: null,
+      lastReadError: null,
     };
     const flow: SignFlow = { ...noop, status: { kind: "signed", signed: signed(attestationTx, "0.0.777") }, settlement };
     const html = renderToStaticMarkup(
@@ -143,6 +145,7 @@ describe("SignScreen", () => {
       payoutTransactionId: null,
       payout: null,
       failure: null,
+      lastReadError: null,
     };
     const flow: SignFlow = {
       ...noop,
