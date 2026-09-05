@@ -9,7 +9,7 @@ describe("configFromEnv", () => {
       mode: "mock",
       expertAccountId: expert,
       ordersTopicId: "MOCK-topic-orders",
-      requesterAccountId: "MOCK-requester",
+      mock: { requesterAccountId: "MOCK-requester", priceHbar: "200" },
     });
   });
 
@@ -29,7 +29,18 @@ describe("configFromEnv", () => {
     expect(() => configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_CHAIN: "" })).toThrow(ConfigError);
   });
 
-  it("requires a real topic on testnet", () => {
+  it("takes the mock price from the environment and refuses one that is not money", () => {
+    const priced = configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_MOCK_PRICE_HBAR: "150.5" });
+    expect(priced.mode === "mock" && priced.mock.priceHbar).toBe("150.5");
+    expect(() => configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_MOCK_PRICE_HBAR: "2e2" })).toThrow(
+      ConfigError,
+    );
+    expect(() => configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_MOCK_PRICE_HBAR: "0.123456789" })).toThrow(
+      ConfigError,
+    );
+  });
+
+  it("requires a real topic on testnet, and carries nothing the mock needs", () => {
     expect(() => configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_CHAIN: "testnet" })).toThrow(
       /VITE_HANDOFF_ORDERS_TOPIC_ID/,
     );
@@ -38,7 +49,8 @@ describe("configFromEnv", () => {
         VITE_EXPERT_ACCOUNT_ID: expert,
         VITE_CHAIN: "testnet",
         VITE_HANDOFF_ORDERS_TOPIC_ID: "0.0.4242",
-      }).ordersTopicId,
-    ).toBe("0.0.4242");
+        VITE_MOCK_PRICE_HBAR: "1",
+      }),
+    ).toEqual({ mode: "testnet", expertAccountId: expert, ordersTopicId: "0.0.4242" });
   });
 });

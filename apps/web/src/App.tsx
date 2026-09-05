@@ -29,13 +29,18 @@ async function boot(): Promise<Booted> {
   const config = configFromEnv(import.meta.env);
   const chain = createWebChain(config);
 
-  // `createWebChain` throws on testnet until the cutover, so from here on the
-  // mode is mock and the stand-ins are legitimate.
+  if (config.mode !== "mock") {
+    // Unreachable today: createWebChain throws for testnet until the cutover.
+    // When the real adapter lands, the inbox hands over the claimed order here
+    // and the stand-ins below go away.
+    throw new Error("the inbox is not built yet; run with VITE_CHAIN=mock");
+  }
+
   const platform = new MockPlatform(chain.chain, config.expertAccountId);
   const order = await seedClaimedReviewOrder(chain.chain, {
     ordersTopicId: config.ordersTopicId,
-    requesterAccountId: config.requesterAccountId,
-    priceHbar: "200",
+    requesterAccountId: config.mock.requesterAccountId,
+    priceHbar: config.mock.priceHbar,
   });
 
   return {
