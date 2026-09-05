@@ -40,6 +40,14 @@ describe("configFromEnv", () => {
     );
   });
 
+  it("refuses a mock price that is not a price, as the envelope would, but in its own words", () => {
+    for (const value of ["0", "0.0", "-5"]) {
+      expect(() => configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_MOCK_PRICE_HBAR: value })).toThrow(
+        /VITE_MOCK_PRICE_HBAR/,
+      );
+    }
+  });
+
   it("requires a real topic on testnet, and carries nothing the mock needs", () => {
     expect(() => configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_CHAIN: "testnet" })).toThrow(
       /VITE_HANDOFF_ORDERS_TOPIC_ID/,

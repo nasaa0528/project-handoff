@@ -11,7 +11,7 @@
  * testnet configuration where nothing reads them.
  */
 
-import { hbarToTinybars } from "@handoff/schema";
+import { assertPositive, hbarToTinybars } from "@handoff/schema";
 
 export type ChainMode = "mock" | "testnet";
 
@@ -71,10 +71,11 @@ function accountId(env: Env, name: string): string {
   return value;
 }
 
+/** A price. Same rule as the envelope's: a real amount, and zero is not a price. */
 function hbarAmount(env: Env, name: string, fallback: string): string {
   const value = env[name]?.trim() || fallback;
   try {
-    hbarToTinybars(value);
+    assertPositive(hbarToTinybars(value));
   } catch (error) {
     throw new ConfigError(`${name} is ${value}: ${(error as Error).message}`);
   }
