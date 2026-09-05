@@ -8,7 +8,9 @@
  * fixture. It never appears in a demo or a recording; its ids say `MOCK-` so
  * that anyone who sees one on screen knows at once.
  *
- * The fixtures are fabricated and say so (hard rule 7).
+ * Every transaction id the mock produces is handed back, even though nothing
+ * here reads them yet. The rule is never to swallow one, and a pattern that
+ * drops ids in a stand-in is a pattern that gets copied into the real thing.
  */
 
 import {
@@ -20,18 +22,18 @@ import {
   SCHEMA_VERSION,
   type ChainAdapter,
 } from "@handoff/schema";
+import fakeArtifact from "../../../../assets/demo/fake-quarterly-summary.txt?raw";
+import fakeSpec from "../../../../assets/demo/fake-review-spec.txt?raw";
 import { notesToBytes, sha256HexOfBytes } from "../sign/notes";
 import type { OrderForSigning } from "../sign/sign";
 import type { PayoutLocator, SettlementReader } from "../sign/settlement";
 
-export const FAKE_SPEC =
-  "FAKE — demo fixture, not a real engagement. Review the attached FAKE quarterly summary " +
-  "for internal consistency: the totals, the dates, and the three footnotes.";
-
-export const FAKE_ARTIFACT =
-  "FAKE DOCUMENT — fabricated for the Handoff demo. No real company, no real figures, " +
-  "no real opinion.\n\nQ2 summary (FAKE): revenue 1,240; costs 980; margin 260. " +
-  "Footnote 1: FAKE. Footnote 2: FAKE. Footnote 3: FAKE.";
+/**
+ * The fabricated order, from `assets/demo/`, where every artifact that can
+ * appear on camera lives (hard rule 7). Both say FAKE in their first word.
+ */
+export const FAKE_SPEC: string = fakeSpec;
+export const FAKE_ARTIFACT: string = fakeArtifact;
 
 export const FAKE_CERT_TAG = "demo-reviewer";
 
@@ -44,6 +46,14 @@ export interface SeedOptions {
   readonly orderId?: string;
   /** Injectable so tests are deterministic. Epoch milliseconds. */
   readonly now?: () => number;
+}
+
+/** What the sign screen needs, plus the ids the posting produced. */
+export interface SeededOrder extends OrderForSigning {
+  readonly transactionIds: {
+    readonly lockFunds: string;
+    readonly submitEnvelope: string;
+  };
 }
 
 /** `Utc` in the schema is second precision, `Z` only. */
@@ -60,7 +70,7 @@ function utcSecondsFromNow(nowMillis: number, seconds: number): string {
 export async function seedClaimedReviewOrder(
   chain: ChainAdapter,
   options: SeedOptions,
-): Promise<OrderForSigning> {
+): Promise<SeededOrder> {
   const now = options.now ?? Date.now;
   const nowMillis = now();
 
@@ -89,13 +99,23 @@ export async function seedClaimedReviewOrder(
     amountTinybars: envelope.price_tinybars,
     requesterAccountId: options.requesterAccountId,
   });
-  await chain.submitMessage(options.ordersTopicId, encodeEnvelope(envelope));
+  const published = await chain.submitMessage(options.ordersTopicId, encodeEnvelope(envelope));
 
-  return { envelope, escrowAccountId: escrow.escrowAccountId, topicId: options.ordersTopicId };
+  return {
+    envelope,
+    escrowAccountId: escrow.escrowAccountId,
+    topicId: options.ordersTopicId,
+    transactionIds: {
+      lockFunds: escrow.transactionId,
+      submitEnvelope: published.transactionId,
+    },
+  };
 }
 
 export interface MockPayout {
   readonly scheduleId: string;
+  /** The verifier's signature, then the schedule admin's. The second one fired the transfer. */
+  readonly signatureTransactionIds: readonly [verifier: string, admin: string];
   readonly payoutTransactionId: string;
 }
 
@@ -137,14 +157,15 @@ export class MockPlatform {
       expiresAt: order.envelope.deadline,
     });
 
-    await this.#chain.signSchedule(schedule.scheduleId); // the verifier
-    const admin = await this.#chain.signSchedule(schedule.scheduleId); // the schedule admin
+    const verifier = await this.#chain.signSchedule(schedule.scheduleId);
+    const admin = await this.#chain.signSchedule(schedule.scheduleId);
     if (!admin.executed) {
       throw new Error(`mock schedule ${schedule.scheduleId} did not execute after two signatures`);
     }
 
     const payout: MockPayout = {
       scheduleId: schedule.scheduleId,
+      signatureTransactionIds: [verifier.transactionId, admin.transactionId],
       payoutTransactionId: admin.transactionId,
     };
     this.#payouts.set(orderId, payout);

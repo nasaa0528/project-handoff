@@ -25,6 +25,11 @@ describe("seedClaimedReviewOrder", () => {
     expect(order.escrowAccountId).toMatch(/^MOCK-escrow-/);
     expect(order.topicId).toBe(TOPIC);
 
+    // Both ids the posting produced come back. Neither is swallowed.
+    expect(order.transactionIds.lockFunds).toMatch(/^MOCK-tx-/);
+    expect(order.transactionIds.submitEnvelope).toMatch(/^MOCK-tx-/);
+    expect(order.transactionIds.lockFunds).not.toBe(order.transactionIds.submitEnvelope);
+
     const messages = await chain.readMessages(TOPIC);
     expect(messages).toHaveLength(1);
     const body = messages[0]?.contents ?? "";
@@ -34,9 +39,9 @@ describe("seedClaimedReviewOrder", () => {
     expect(body).not.toContain(FAKE_ARTIFACT.slice(0, 20));
   });
 
-  it("says FAKE on every fixture, out loud", () => {
-    expect(FAKE_SPEC).toContain("FAKE");
-    expect(FAKE_ARTIFACT).toContain("FAKE");
+  it("says FAKE in the first word of every fixture, as assets/README.md requires", () => {
+    expect(FAKE_SPEC.startsWith("FAKE")).toBe(true);
+    expect(FAKE_ARTIFACT.startsWith("FAKE")).toBe(true);
   });
 });
 
@@ -50,6 +55,12 @@ describe("MockPlatform", () => {
 
     const first = await platform.releasePayment(order);
     expect(chain.hasExecuted(first.scheduleId)).toBe(true);
+    // Two signatures, two ids, and the payout is the one that fired it.
+    const [verifierTx, adminTx] = first.signatureTransactionIds;
+    expect(verifierTx).toMatch(/^MOCK-tx-/);
+    expect(adminTx).toMatch(/^MOCK-tx-/);
+    expect(verifierTx).not.toBe(adminTx);
+    expect(first.payoutTransactionId).toBe(adminTx);
     expect(await chain.getTransaction(first.payoutTransactionId)).toMatchObject({ status: "SUCCESS" });
     expect(await platform.locator(order.envelope.order_id).locate()).toBe(first.payoutTransactionId);
 
