@@ -224,10 +224,14 @@ Payload:
   signature carries the risk.
 - Money is a string, never a float; tinybar/HBAR/display conversions live in ONE shared
   tested module in the schema package.
-- **One demo price, committed once:** set on day 1 after checking faucet limits
-  (target: a believable professional figure, e.g. 200 HBAR, narrated as a
-  stablecoin-denominated stand-in; drop only if faucet math forces it). Decided once,
-  never changed on camera.
+- **The two prices, committed 2026-09-06 and never changed on camera:** the order price
+  is **100 HBAR** (`10000000000` tinybars) and the x402 per-call fee is **0.5 HBAR**
+  (`50000000` tinybars). 100 rather than the proposed 200 because the faucet gives 100 per
+  call and 100 per rolling 24 hours, so 200 would mean pooling two people or waiting two
+  days ahead of a recording. The figure is narrated as a stablecoin-denominated stand-in,
+  so the HBAR amount was never carrying the credibility. The 1:200 ratio makes the two
+  money flows legible on camera without narration. See
+  `decisions/2026-09-06-demo-price-and-x402-fee.md`.
 - **Currency defense** (one line in the close, labeled roadmap): experts in
   weakening-currency economies settle in seconds into a globally liquid digital asset.
   Stablecoin rail + fiat off-ramps: roadmap, with per-rail rules and minimums.
@@ -453,8 +457,8 @@ Closed on 2026-09-05 from the ETHGlobal dashboard and `team-seats.md`:
 
 Still open:
 
-4. Ratify the demo price point (proposed: 200 HBAR, pending faucet check), and separately
-   the x402 per-call fee.
+4. ~~Ratify the demo price point and the x402 per-call fee.~~ **Committed 2026-09-06:
+   100 HBAR and 0.5 HBAR.**
 
 Also closed on 2026-09-05: the ETHGlobal track is **Building from Scratch**, so the
 Continuity prize is not available to us, and the public repo required by the prize is
