@@ -19,12 +19,13 @@ export function NotesEditor({
         value={notes}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
-        rows={6}
+        rows={5}
+        className="min-h-28 rounded-xl text-sm leading-relaxed"
         placeholder="What you checked, what you found, and why the verdict is what it is."
         aria-label="Written notes"
       />
       <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-        <span>Stored off-chain. Only this hash goes on the ledger as</span>
+        <span>Only this hash goes on the ledger:</span>
         <code className="font-mono">notes_hash</code>
         <span>=</span>
         {notesHash === null ? <span>…</span> : <ShortHash value={notesHash} />}

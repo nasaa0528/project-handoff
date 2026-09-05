@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import { byteLength, DEFECT_CODE_MAX_BYTES, DEFECTS_MAX_ITEMS } from "@handoff/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,36 +42,37 @@ export function DefectsEditor({
 
   return (
     <div className="grid gap-3">
-      <div className="flex flex-wrap gap-2">
-        {defects.length === 0 && <span className="text-sm text-muted-foreground">No defects listed.</span>}
-        {defects.map((defect, index) => (
-          <span
-            key={`${defect}-${index}`}
-            className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1 font-mono text-xs"
-          >
-            {defect}
-            {!disabled && (
-              <button
-                type="button"
-                aria-label={`Remove ${defect}`}
-                className="ml-1 text-muted-foreground hover:text-foreground"
-                onClick={() => onChange(defects.filter((_, i) => i !== index))}
-              >
-                ×
-              </button>
-            )}
-          </span>
-        ))}
-      </div>
+      {defects.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {defects.map((defect, index) => (
+            <span
+              key={`${defect}-${index}`}
+              className="inline-flex items-center gap-1 rounded-full bg-muted py-1 pr-1.5 pl-3 font-mono text-xs"
+            >
+              {defect}
+              {!disabled && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${defect}`}
+                  className="flex size-5 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                  onClick={() => onChange(defects.filter((_, i) => i !== index))}
+                >
+                  <X className="size-3" aria-hidden />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
 
-      {!disabled && (
+      {!disabled ? (
         <div className="flex gap-2">
           <Input
             value={draft}
-            placeholder="e.g. FN-2-DATE"
+            placeholder={defects.length === 0 ? "e.g. FN-2-DATE, or leave empty" : "Another code"}
             aria-label="Defect code"
             spellCheck={false}
-            className="font-mono"
+            className="h-10 rounded-xl font-mono"
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -80,13 +82,15 @@ export function DefectsEditor({
             }}
             disabled={full}
           />
-          <Button type="button" variant="secondary" onClick={add} disabled={!canAdd}>
+          <Button type="button" variant="secondary" className="h-10 rounded-xl" onClick={add} disabled={!canAdd}>
             Add
           </Button>
         </div>
+      ) : (
+        defects.length === 0 && <span className="text-sm text-muted-foreground">No defects listed.</span>
       )}
 
-      <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground tabular-nums">
         <span>
           {defects.length} of {DEFECTS_MAX_ITEMS} codes
         </span>
