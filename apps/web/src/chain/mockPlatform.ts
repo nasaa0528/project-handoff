@@ -114,6 +114,10 @@ export async function seedClaimedReviewOrder(
 
 export interface MockPayout {
   readonly scheduleId: string;
+  /** The ScheduleCreate. On Hedera the payout's own id derives from this one. */
+  readonly scheduleTransactionId: string;
+  /** IDENTICAL_SCHEDULE_ALREADY_CREATED, the idempotency signal behind never double-paying. */
+  readonly scheduleAlreadyExisted: boolean;
   /** The verifier's signature, then the schedule admin's. The second one fired the transfer. */
   readonly signatureTransactionIds: readonly [verifier: string, admin: string];
   readonly payoutTransactionId: string;
@@ -165,6 +169,8 @@ export class MockPlatform {
 
     const payout: MockPayout = {
       scheduleId: schedule.scheduleId,
+      scheduleTransactionId: schedule.transactionId,
+      scheduleAlreadyExisted: schedule.alreadyExisted,
       signatureTransactionIds: [verifier.transactionId, admin.transactionId],
       payoutTransactionId: admin.transactionId,
     };

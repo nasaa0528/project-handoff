@@ -55,6 +55,9 @@ describe("MockPlatform", () => {
 
     const first = await platform.releasePayment(order);
     expect(chain.hasExecuted(first.scheduleId)).toBe(true);
+    // The ScheduleCreate's own id and whether it was a replay come back too.
+    expect(first.scheduleTransactionId).toMatch(/^MOCK-tx-/);
+    expect(first.scheduleAlreadyExisted).toBe(false);
     // Two signatures, two ids, and the payout is the one that fired it.
     const [verifierTx, adminTx] = first.signatureTransactionIds;
     expect(verifierTx).toMatch(/^MOCK-tx-/);
