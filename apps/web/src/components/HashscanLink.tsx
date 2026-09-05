@@ -13,10 +13,10 @@ export function HashscanLink({ kind, id }: { kind: "transaction" | "account"; id
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+      className="text-[0.6875rem] text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground"
       title="Hashscan is a viewer. Its indexing can lag behind the mirror node this screen reads."
     >
-      View on Hashscan ↗
+      Hashscan ↗
     </a>
   );
 }
