@@ -1,7 +1,7 @@
 /** An id, a hash, a timestamp: monospace, wrapping anywhere, selectable in one go. */
 export function Mono({ children, className = "" }: { children: string; className?: string }) {
   return (
-    <code className={`font-mono text-[0.8125rem] break-all select-all ${className}`}>{children}</code>
+    <code className={`font-mono text-[0.8125rem] wrap-anywhere select-all ${className}`}>{children}</code>
   );
 }
 
