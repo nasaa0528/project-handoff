@@ -35,3 +35,7 @@ Newest last.
 - [The hosted Blocky402 testnet facilitator, not the scaffold's](2026-09-05-hosted-blocky402-not-the-scaffold-facilitator.md)
 - [The x402 gate covers order posting only](2026-09-05-gate-covers-order-posting-only.md) — closes the last open x402 question
 - [The 402 lives in an HTTP resource server, and the MCP tool pays it](2026-09-05-402-lives-in-an-http-resource-server.md)
+
+### 2026-09-06
+
+- [The two prices, committed](2026-09-06-demo-price-and-x402-fee.md)

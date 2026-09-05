@@ -346,7 +346,5 @@ as a subagent so the diff stays out of your session.
       threshold key alone. Decide by end of hour 1, then update the brief's lifecycle,
       `docs/architecture.md`, and the demo narration to match. Until this is settled, do
       not hard-code either shape.
-- [ ] **Demo price**, proposed 200 HBAR pending a faucet check, and separately the
-      **x402 per-call fee**. Both committed once and never changed on camera.
 - [ ] **Who presents at live judging round 2**, Tue Sep 15. Not in `team-seats.md` yet.
 - [ ] **Does the x402 gate cover only order posting**, or reads as well?
