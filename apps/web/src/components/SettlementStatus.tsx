@@ -11,15 +11,7 @@ import { Mono } from "./Mono";
 
 type StepState = "done" | "active" | "pending" | "failed";
 
-function Step({
-  state,
-  title,
-  children,
-}: {
-  state: StepState;
-  title: string;
-  children: ReactNode;
-}) {
+function Step({ state, title, children }: { state: StepState; title: string; children: ReactNode }) {
   const marker = {
     done: "bg-emerald-600 text-white",
     active: "bg-foreground text-background animate-pulse",
@@ -46,10 +38,25 @@ function seconds(ms: number): string {
   return `${Math.floor(ms / 1000)} s`;
 }
 
+function TransactionLine({ id }: { id: string }) {
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <Mono>{id}</Mono>
+      <HashscanLink kind="transaction" id={id} />
+    </span>
+  );
+}
+
+function ReadError({ error }: { error: string | null }) {
+  if (error === null) return null;
+  return <span className="text-xs">Last read failed: {error}. Reading again.</span>;
+}
+
 /**
  * The three things the screen learns after the sign, in order: consensus
  * accepted the attestation, a mirror node shows it, and the mirror node shows
- * the payout. The first comes back with the submit; the other two are reads.
+ * the payout. The first comes back with the submit; the other two are reads,
+ * and every word below is gated on what a read actually returned.
  */
 export function SettlementStatus({
   mode,
@@ -57,6 +64,7 @@ export function SettlementStatus({
   expertAccountId,
   signed,
   settlement,
+  platformIssue,
   onCheckAgain,
 }: {
   mode: ChainMode;
@@ -64,20 +72,30 @@ export function SettlementStatus({
   expertAccountId: string;
   signed: SignedAttestation;
   settlement: SettlementState;
+  platformIssue: string | null;
   onCheckAgain: () => void;
 }) {
   const expected = Math.round(MIRROR_EXPECTED_LAG_MS / 1000);
-  const attested = settlement.attestation !== null;
+  const attestationSeen = settlement.attestation?.status === "SUCCESS";
+  const attestationFailed = settlement.attestation !== null && settlement.attestation.status !== "SUCCESS";
+  const payoutSeen = settlement.payout?.status === "SUCCESS";
+  const payoutFailed = settlement.payout !== null && settlement.payout.status !== "SUCCESS";
   const settled = settlement.phase === "settled";
   const failed = settlement.phase === "failed";
   const stalled = settlement.phase === "stalled";
 
-  const mirrorState: StepState = attested ? "done" : failed ? "failed" : stalled ? "pending" : "active";
-  const payoutState: StepState = settled
+  const mirrorState: StepState = attestationSeen
     ? "done"
-    : failed && attested
+    : attestationFailed
       ? "failed"
-      : attested && !stalled
+      : stalled
+        ? "pending"
+        : "active";
+  const payoutState: StepState = payoutSeen
+    ? "done"
+    : payoutFailed
+      ? "failed"
+      : attestationSeen && !stalled
         ? "active"
         : "pending";
 
@@ -101,18 +119,15 @@ export function SettlementStatus({
             <span>
               Accepted by consensus at <Mono>{signed.consensusTimestamp}</Mono>, sequence {signed.sequenceNumber}.
             </span>
-            <span className="flex flex-wrap items-center gap-2">
-              <Mono>{signed.transactionId}</Mono>
-              <HashscanLink kind="transaction" id={signed.transactionId} />
-            </span>
+            <TransactionLine id={signed.transactionId} />
           </Step>
 
           <Step state={mirrorState} title="Visible on the mirror node">
-            {attested && settlement.attestation !== null ? (
+            {attestationSeen && settlement.attestation !== null ? (
               <span>
                 Seen at <Mono>{settlement.attestation.consensusTimestamp}</Mono>.
               </span>
-            ) : failed ? (
+            ) : attestationFailed ? (
               <span className="text-destructive">{settlement.failure}</span>
             ) : stalled ? (
               <span>
@@ -129,26 +144,39 @@ export function SettlementStatus({
                 Reading the mirror node, usually about {expected} seconds. {seconds(settlement.elapsedMs)} so far.
               </span>
             )}
+            {!attestationSeen && !attestationFailed && <ReadError error={settlement.lastReadError} />}
           </Step>
 
           <Step state={payoutState} title="Payment released">
-            {settled && settlement.payout !== null ? (
-              <>
-                <span>
-                  {price} to <Mono>{expertAccountId}</Mono> at <Mono>{settlement.payout.consensusTimestamp}</Mono>.
-                </span>
-                <span className="flex flex-wrap items-center gap-2">
-                  <Mono>{settlement.payout.transactionId}</Mono>
-                  <HashscanLink kind="transaction" id={settlement.payout.transactionId} />
-                </span>
-              </>
-            ) : failed && attested ? (
+            {payoutSeen && settlement.payout !== null ? (
+              <span>
+                {price}, the order value per the envelope, to your account <Mono>{expertAccountId}</Mono>, executed
+                at <Mono>{settlement.payout.consensusTimestamp}</Mono>.
+              </span>
+            ) : payoutFailed ? (
               <span className="text-destructive">{settlement.failure}</span>
+            ) : stalled && attestationSeen ? (
+              <span>
+                No answer about the payout in {seconds(settlement.elapsedMs)}.{" "}
+                {settlement.payoutTransactionId === null
+                  ? "The platform has not released payment yet."
+                  : "The payout is known but the mirror node has not shown it yet."}{" "}
+                Nothing is lost: the attestation stands on the ledger, and the payout is an idempotent retry that
+                lands on recovery.
+              </span>
             ) : (
               <span>
                 The platform verifier and the schedule admin co-sign after validating your attestation. You do not
                 do this step, and your key cannot.
                 {mode === "mock" ? " In mock mode a stand-in platform does it here." : ""}
+              </span>
+            )}
+            {settlement.payoutTransactionId !== null && <TransactionLine id={settlement.payoutTransactionId} />}
+            {attestationSeen && !payoutSeen && !payoutFailed && <ReadError error={settlement.lastReadError} />}
+            {platformIssue !== null && (
+              <span className="text-amber-700 dark:text-amber-300">
+                {mode === "mock" ? "The stand-in platform failed" : "The platform reported a problem"}: {platformIssue}.
+                Your attestation stands regardless.
               </span>
             )}
           </Step>
@@ -160,7 +188,7 @@ export function SettlementStatus({
               Check again
             </Button>
             <span className="text-xs text-muted-foreground">
-              Nothing is re-signed or re-sent. The payout is an idempotent retry on the platform's side.
+              Nothing is re-signed or re-sent. What the mirror node already confirmed is kept.
             </span>
           </div>
         )}
