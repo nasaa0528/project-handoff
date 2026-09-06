@@ -30,7 +30,9 @@ Facilitator is `https://api.testnet.blocky402.com`, network `hedera:testnet`. Ne
 
 - **Never confuse the two money flows.** The x402 micropayment is the service fee for
   calling the tool. The order value is the price of the judgment and it goes to escrow.
-  Different rails, different accounts, different sizes.
+  Different rails, different accounts, different sizes. Tool replies are a designed
+  surface: use the copy blocks in `docs/design-system.md` so 0.5 HBAR and 100 HBAR
+  cannot read as one payment.
 - **Never reuse the escrow threshold key as the x402 receiver.** Separate accounts.
 - **Never use USDC.** HBAR is native and needs no token association.
 - **Never import the Hedera SDK.** Go through `@handoff/chain`.

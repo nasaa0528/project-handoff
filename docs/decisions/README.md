@@ -39,3 +39,4 @@ Newest last.
 ### 2026-09-06
 
 - [The two prices, committed](2026-09-06-demo-price-and-x402-fee.md)
+- [UX philosophy and design system for this week](2026-09-06-ux-philosophy-and-design-system.md)

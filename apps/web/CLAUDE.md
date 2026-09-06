@@ -33,3 +33,7 @@ surface before it is a codebase.
 
 Stack is React, Tailwind and shadcn/ui. Screens get sketched as throwaway HTML
 artifacts, not in a design tool. The review workspace is the one worth mocking carefully.
+
+Build from `docs/ux-philosophy.md` and `docs/design-system.md`. Copy dictionary and the
+two money treatments are binding on camera. Do not add a wallet, seed phrase, or
+requester UI.
