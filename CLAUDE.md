@@ -34,6 +34,8 @@ Map of the repo docs:
 | `docs/operating-plan.md` | How the team works |
 | `docs/decisions/` | One dated file per settled decision, README is the index |
 | `docs/architecture.md` | Mermaid diagrams, kept current in the same PR as the change |
+| `docs/ux-philosophy.md` | How the product should feel; what each user walks away with |
+| `docs/design-system.md` | Tokens, copy dictionary, expert screens, MCP reply recipes |
 | `docs/links.md` | Every URL anyone needs |
 | `docs/research/` | Conclusions and gotchas only, never documentation summaries |
 
