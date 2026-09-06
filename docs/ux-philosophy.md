@@ -36,7 +36,8 @@ If a screen does not advance one of these, it is noise.
 1. The order was posted.
 2. Two different payments happened: **0.5 HBAR to place the order**, **100 HBAR locked
    for the judgment**.
-3. The verdict (approve / approve-with-changes / reject) — the product.
+3. The verdict **with its reasons** — the defect codes and the reviewer’s notes. The
+   product is the judgment, not the one word.
 4. Settlement happened; the expert was paid even on reject.
 5. A way to verify, not a lecture: a Hashscan link, not a hex dump.
 
@@ -46,8 +47,9 @@ If a screen does not advance one of these, it is noise.
 2. It is mine to review — or it is not, and that is ordinary.
 3. The artifact, labeled FAKE, is the thing I am judging.
 4. I can form a bounded, structured verdict.
-5. Signing publishes *my* account’s attestation forever. Notes stay off-chain; only
-   their hash is public.
+5. I see my name before I sign. Signing publishes the verdict and my defect codes under
+   my account, forever. My notes and the document stay private, and my notes reach the
+   requester — they are what I was paid for.
 6. Payment landed, confirmed by a mirror-node read, not by hope.
 
 **Nobody this week needs** a seed phrase, a tinybar, a state-machine enum, a dispute
@@ -59,7 +61,8 @@ they live in the roadmap.
 1. **Confidence, not vertigo.** A professional service, not a trading terminal. Calm
    paper, one action, no dashboard chrome.
 2. **This is real and permanent.** A signed attestation has weight. Surface it as
-   gravity (“Published · attributable forever”), not as a hash.
+   gravity (“Published · signed by you, attributable forever”), not as a hash. Receipt
+   first, permanence second — the warning belongs *before* the click, the receipt after.
 3. **A human stands behind this.** The expert is signing their name to their work.
    The sign button is the product, not a submit.
 4. **Never punished for the machine’s pace.** Mirror lag is “Confirming.” A lost claim
@@ -118,7 +121,9 @@ crypto because that is what ships; we do not fake a bank.
 6. **Status is a sentence.** Posted, Claimed, Under review, Published, Confirming, Paid.
    Never `POSTED` / `DELIVERED` / `SETTLED` on a default screen.
 7. **Confirming is a state, not a spinner of doom.** Budget ~6s for the mirror. Stay
-   readable. Do not fake “Paid” before the mirror says so.
+   readable. Do not fake “Paid” before the mirror says so. **Claim uses it too**: the
+   workspace opens only on a confirmed claim. After ~60s, Confirming becomes
+   “Published · payment pending”, never an endless pulse.
 8. **Lost claim race is ordinary.** “Someone else claimed this.” Not an error toast.
 9. **Reject is a delivered product.** Treat it like a stamp, not a failure. No dispute
    affordance — disputes are stubbed.
@@ -157,7 +162,8 @@ and settlement in the same words the expert app uses.
 
 For the expert, and on camera: after Sign, the screen goes still.
 
-**Published · attributable forever.** Then, without hurry, **Paid · 100 HBAR.**
+**Published · signed by you, attributable forever.** Then, without hurry, **Paid · 100
+HBAR to your account.** A receipt names the payee.
 
 That is the product. Everything upstream exists to reach it. Everything downstream
 (Hashscan, ids) protects it. Do not follow it with a marketing banner or a “what’s next.”
@@ -171,6 +177,41 @@ the expert was paid, especially on reject: *you bought judgment, not approval.*
 - Settlement is a mirror-node read.
 - Nothing on camera uses `MockChainAdapter`. Mock ids 404 on Hashscan.
 - No jury, no RFQ-from-reject, no “incentive system is closed.”
+
+## The deliverable must arrive
+
+The expert is paid for a judgment; the requester must receive it. Two persona reviews,
+from opposite seats, found the same hole independently: the close handed the requester
+one word and a hash of their own document, and never told the expert who reads their
+notes. Defect codes are public on-chain and go inline in the close. Notes live in the
+content store and are delivered in the close. The Sign screen says, in structure not
+prose, what is public and what is private and that the notes are delivered.
+
+## Laws of UX, applied once
+
+The thirty laws at lawsofux.com were run as a checklist. Twenty-six confirm the design as
+written. Four changed something, and they are folded into `docs/design-system.md`:
+
+- **Paradox of the Active User + Chunking:** the Sign summary is structured into public
+  and private, because people act rather than read helper prose.
+- **Postel’s Law:** the defects editor and tag matching normalize input rather than reject
+  it. Strict about what is published, liberal about what is typed.
+- **Fitts’s Law:** the primary action is full width at the end of the column; “Not yet” is
+  small and apart from Confirm.
+- **Zeigarnik + Goal-Gradient:** a three-step mark in the workspace column, Sign appearing
+  in-column right after the verdict, and a status query for the requester so the open
+  loop can close.
+
+Three places the laws lose on purpose, named so nobody “fixes” them:
+
+- **Doherty versus honesty.** Paid waits for the mirror even past 400ms. Confirming is the
+  acknowledgment Doherty asks for; the result waits for the truth.
+- **Postel versus the money path.** Amounts are parsed strictly. A lenient money parser is
+  how money goes missing. Postel governs text, not tinybars.
+- **Hick’s versus equality.** Three equal verdicts, none preselected, slightly slower than
+  two. A default verdict is the bias the product exists to prevent.
+
+The laws are a checklist Jack runs once, not a rulebook that outranks the domain.
 
 ## What this file is not
 
