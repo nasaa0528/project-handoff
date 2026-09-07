@@ -8,3 +8,6 @@ itself, not just in the filename. A judge watching the recording has to be able 
 it without pausing.
 
 Large files and recordings go to shared Drive instead. This folder stays small.
+
+`demo/` holds the fabricated order the apps import at build time: the task spec and
+the artifact under review. Both say FAKE in their first word.

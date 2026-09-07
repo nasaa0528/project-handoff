@@ -1,0 +1,7 @@
+FAKE — demo fixture for the Handoff project, not a real engagement.
+
+Task (FAKE): review the attached FAKE quarterly summary for internal
+consistency: the totals, the dates, and the three footnotes. Return a
+verdict with defect codes and written notes.
+
+No real company, no real figures, no real opinion. FAKE.

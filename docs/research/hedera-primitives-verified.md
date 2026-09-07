@@ -69,6 +69,15 @@ Base URL `https://testnet.mirrornode.hedera.com`. Read-only, no auth, no fees.
   submit. Design the expert app for that, and do not put a Hashscan link on the critical
   path of a 90-second demo.
 - There is also a `/api/v1/schedules` family for scheduled-transaction state.
+  `GET /api/v1/schedules/{id}` returns `executed_timestamp` (null until the schedule
+  fires) and `deleted`, which is the settlement read the expert app wants.
+- **The SDK and the REST API spell a transaction id differently.** The SDK prints
+  `0.0.1234@1700000000.123456789`; the REST path needs `0.0.1234-1700000000-123456789`.
+  Hashscan accepts either in `/testnet/transaction/…`. Verified in the docs 2026-09-05.
+- **A scheduled transaction's id is the ScheduleCreate's id with the `scheduled` flag
+  set**, and its consensus timestamp is the triggering ScheduleSign's plus one
+  nanosecond. Read it with `GET /api/v1/transactions/{id}?scheduled=true`. That is how
+  a payout is found from the schedule that created it.
 
 ## Threshold keys: one constructor
 

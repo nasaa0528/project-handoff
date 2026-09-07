@@ -1,0 +1,12 @@
+FAKE DOCUMENT — fabricated for the Handoff demo. No real company, no real
+figures, no real opinion. FAKE.
+
+Q2 summary (FAKE)
+  Revenue   1,240
+  Costs       980
+  Margin      260
+
+Footnote 1 (FAKE): every figure above is a placeholder.
+Footnote 2 (FAKE): dated before the period ends, on purpose, so a reviewer
+has something to find.
+Footnote 3 (FAKE): this document exists only for a demo recording.
