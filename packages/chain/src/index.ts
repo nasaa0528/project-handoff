@@ -5,3 +5,4 @@ export * from "./schedule.js";
 export * from "./hcs.js";
 export * from "./lifecycle.js";
 export * from "./mirror.js";
+export * from "./hedera-adapter.js";
