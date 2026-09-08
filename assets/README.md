@@ -1,6 +1,11 @@
-# Demo assets
+# Assets
 
-**Everything in here is fabricated.** Hard rule 7: never a real contract, filing, PII,
+Two unrelated things live here. `brand/` and `cover.png` are real project
+material. Everything else is a demo artifact and the rule below governs it.
+
+## Demo artifacts
+
+**Every one of them is fabricated.** Hard rule 7: never a real contract, filing, PII,
 or anything that could read as a genuine professional opinion.
 
 Every artifact that appears on camera carries a visible **FAKE** label in the artifact
