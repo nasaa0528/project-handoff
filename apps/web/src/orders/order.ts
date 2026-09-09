@@ -10,6 +10,11 @@
 import type { OrderForSigning } from "../sign/sign";
 
 export interface ExpertOrder extends OrderForSigning {
+  /**
+   * The orders topic: where this envelope was published, and where its claims
+   * go. Distinct from `attestationsTopicId`, which is where the verdict goes.
+   */
+  readonly ordersTopicId: string;
   /** What the work is, one line. */
   readonly title: string;
   /** "What the requester is asking." The task description, from the content store. */

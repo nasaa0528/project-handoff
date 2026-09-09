@@ -26,8 +26,14 @@ export type ChainMode = "mock" | "testnet";
 interface Common {
   /** Prefills the connect screen. Optional, and never the source of who signs. */
   readonly expertAccountIdPrefill: string | null;
-  /** Where orders and claims are published and, until P1 says otherwise, attestations too. */
+  /** Where orders and claims are published. Not where attestations go. */
   readonly ordersTopicId: string;
+  /**
+   * Where attestations are published. A separate topic from the orders one,
+   * because P1 provisions them separately and apps/mcp reads the verdict from
+   * this one. One variable per topic, so neither can silently become the other.
+   */
+  readonly attestationsTopicId: string;
 }
 
 export interface MockChainConfig extends Common {
@@ -162,6 +168,7 @@ export function configFromEnv(env: Env): WebChainConfig {
       mode,
       expertAccountIdPrefill,
       ordersTopicId: env["VITE_HANDOFF_ORDERS_TOPIC_ID"]?.trim() || "MOCK-topic-orders",
+      attestationsTopicId: env["VITE_HANDOFF_ATTESTATIONS_TOPIC_ID"]?.trim() || "MOCK-topic-attestations",
       mock: {
         requesterAccountId: env["VITE_MOCK_REQUESTER_ACCOUNT_ID"]?.trim() || "MOCK-requester",
         priceHbar: hbarAmount(env, "VITE_MOCK_PRICE_HBAR", DEMO_PRICE_HBAR),
@@ -173,6 +180,7 @@ export function configFromEnv(env: Env): WebChainConfig {
     mode,
     expertAccountIdPrefill,
     ordersTopicId: required(env, "VITE_HANDOFF_ORDERS_TOPIC_ID"),
+    attestationsTopicId: required(env, "VITE_HANDOFF_ATTESTATIONS_TOPIC_ID"),
     mirrorNodeUrl: serviceUrl(env, "VITE_HEDERA_MIRROR_NODE_URL", DEFAULT_MIRROR_NODE_URL),
     contentUrl: serviceUrl(env, "VITE_CONTENT_URL"),
     escrowAccountId: accountIdFrom("VITE_HANDOFF_ESCROW_ACCOUNT_ID", required(env, "VITE_HANDOFF_ESCROW_ACCOUNT_ID")),

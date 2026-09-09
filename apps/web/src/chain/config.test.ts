@@ -9,6 +9,7 @@ describe("configFromEnv", () => {
       mode: "mock",
       expertAccountIdPrefill: null,
       ordersTopicId: "MOCK-topic-orders",
+      attestationsTopicId: "MOCK-topic-attestations",
       mock: { requesterAccountId: "MOCK-requester", priceHbar: "100" },
     });
   });
@@ -65,7 +66,7 @@ describe("configFromEnv", () => {
     }
     // Ids, topics and prices are not keys.
     expect(() =>
-      configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_HANDOFF_ORDERS_TOPIC_ID: "0.0.4242", VITE_MOCK_PRICE_HBAR: "100" }),
+      configFromEnv({ VITE_EXPERT_ACCOUNT_ID: expert, VITE_HANDOFF_ORDERS_TOPIC_ID: "0.0.4242", VITE_HANDOFF_ATTESTATIONS_TOPIC_ID: "0.0.4243", VITE_MOCK_PRICE_HBAR: "100" }),
     ).not.toThrow();
   });
 
@@ -91,18 +92,29 @@ describe("configFromEnv", () => {
     VITE_EXPERT_ACCOUNT_ID: expert,
     VITE_CHAIN: "testnet",
     VITE_HANDOFF_ORDERS_TOPIC_ID: "0.0.4242",
+    VITE_HANDOFF_ATTESTATIONS_TOPIC_ID: "0.0.4243",
     VITE_CONTENT_URL: "https://content.example/store/",
     VITE_HANDOFF_ESCROW_ACCOUNT_ID: "0.0.999",
   };
 
   it("requires the topic, the content URL and the escrow account on testnet, and carries nothing the mock needs", () => {
     expect(() => configFromEnv({ VITE_CHAIN: "testnet" })).toThrow(/VITE_HANDOFF_ORDERS_TOPIC_ID/);
-    expect(() => configFromEnv({ VITE_CHAIN: "testnet", VITE_HANDOFF_ORDERS_TOPIC_ID: "0.0.4242" })).toThrow(/VITE_CONTENT_URL/);
+    expect(() => configFromEnv({ VITE_CHAIN: "testnet", VITE_HANDOFF_ORDERS_TOPIC_ID: "0.0.4242" })).toThrow(
+      /VITE_HANDOFF_ATTESTATIONS_TOPIC_ID/,
+    );
+    expect(() =>
+      configFromEnv({
+        VITE_CHAIN: "testnet",
+        VITE_HANDOFF_ORDERS_TOPIC_ID: "0.0.4242",
+        VITE_HANDOFF_ATTESTATIONS_TOPIC_ID: "0.0.4243",
+      }),
+    ).toThrow(/VITE_CONTENT_URL/);
     expect(() => configFromEnv({ ...testnet, VITE_HANDOFF_ESCROW_ACCOUNT_ID: "" })).toThrow(/VITE_HANDOFF_ESCROW_ACCOUNT_ID/);
     expect(configFromEnv({ ...testnet, VITE_MOCK_PRICE_HBAR: "1" })).toEqual({
       mode: "testnet",
       expertAccountIdPrefill: expert,
       ordersTopicId: "0.0.4242",
+      attestationsTopicId: "0.0.4243",
       mirrorNodeUrl: "https://testnet.mirrornode.hedera.com/api/v1",
       contentUrl: "https://content.example/store",
       escrowAccountId: "0.0.999",

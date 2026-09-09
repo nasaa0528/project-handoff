@@ -25,6 +25,7 @@ describe("post, claim, sign, settle", () => {
 
     const order = await seedClaimedReviewOrder(chain, {
       ordersTopicId: "MOCK-topic-orders",
+      attestationsTopicId: "MOCK-topic-attestations",
       requesterAccountId: "MOCK-requester",
       priceHbar: "100",
       now,
@@ -42,9 +43,14 @@ describe("post, claim, sign, settle", () => {
 
     // The verifier reads the attestation, validates it, and co-signs. The
     // expert does not do this and cannot: the platform keys are not here.
-    const messages = await chain.readMessages(order.topicId);
-    expect(messages).toHaveLength(2);
-    expect(decodeAttestation(messages[1]?.contents ?? "")).toEqual(signed.attestation);
+    // On its own topic, so the verifier finds it where it is configured to
+    // look. The orders topic keeps the envelope and the claims, and never the
+    // verdict — publishing to the wrong one fails silently.
+    const messages = await chain.readMessages(order.attestationsTopicId);
+    expect(messages).toHaveLength(1);
+    expect(decodeAttestation(messages[0]?.contents ?? "")).toEqual(signed.attestation);
+    const onOrders = await chain.readMessages(order.ordersTopicId);
+    expect(onOrders.map((m) => m.contents)).not.toContain(signed.body);
     const payout = await platform.releasePayment(order);
 
     const reader = withSimulatedMirrorLag(chain, 6_000, now);

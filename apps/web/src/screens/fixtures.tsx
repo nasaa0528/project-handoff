@@ -43,7 +43,8 @@ export function order(overrides: Partial<ExpertOrder> = {}): ExpertOrder {
   return {
     envelope,
     escrowAccountId: "MOCK-escrow-ord_demo",
-    topicId: "MOCK-topic-orders",
+    ordersTopicId: "MOCK-topic-orders",
+    attestationsTopicId: "MOCK-topic-attestations",
     title: "Quarterly summary — internal consistency",
     ask: "FAKE — demo fixture.\n\nTask (FAKE): review the attached summary for consistency.",
     documentWords: 80,
@@ -56,7 +57,7 @@ export function signed(transactionId: string): SignedAttestation {
     attestation: buildReviewAttestation(envelope, { verdict: "reject", defects: ["FN-2-DATE"], notesHash: "c".repeat(64) }),
     body: "{}",
     notesRef: "memory://notes",
-    topicId: "MOCK-topic-orders",
+    topicId: "MOCK-topic-attestations",
     transactionId,
     consensusTimestamp: "1757000000.000000001",
     sequenceNumber: 2,

@@ -17,7 +17,7 @@ const envelope = ReviewOrder.parse({
   schema_version: SCHEMA_VERSION,
 });
 
-const order: OrderForSigning = { envelope, escrowAccountId: "MOCK-escrow", topicId: "MOCK-topic-orders" };
+const order: OrderForSigning = { envelope, escrowAccountId: "MOCK-escrow", attestationsTopicId: "MOCK-topic-attestations" };
 
 const request: SignRequest = { order, verdict: "approve", defects: [], notes: "All three footnotes foot." };
 
@@ -56,7 +56,7 @@ describe("runSign", () => {
     const o = outcomes();
     await runSign(request, { chain, afterPublish: async () => {} }, o.record);
     expect(o.calls).toEqual(["publish-failed:store down"]);
-    expect(await chain.chain.readMessages(order.topicId)).toEqual([]);
+    expect(await chain.chain.readMessages(order.attestationsTopicId)).toEqual([]);
   });
 
   it("never takes back a publish because the platform hook failed", async () => {
@@ -76,7 +76,7 @@ describe("runSign", () => {
     );
     expect(o.calls).toEqual(["signed:MOCK-tx-1", "platform:verifier unreachable"]);
     // The attestation is on the topic regardless.
-    expect(await chain.chain.readMessages(order.topicId)).toHaveLength(1);
+    expect(await chain.chain.readMessages(order.attestationsTopicId)).toHaveLength(1);
   });
 
   it("does nothing after the publish when there is no platform hook, as on testnet", async () => {

@@ -39,6 +39,8 @@ export const FAKE_CERT_TAG = "demo-reviewer";
 
 export interface SeedOptions {
   readonly ordersTopicId: string;
+  /** Where the verdict goes. Separate from the orders topic, as on testnet. */
+  readonly attestationsTopicId: string;
   readonly requesterAccountId: string;
   /** In HBAR, as a string. Never a float. */
   readonly priceHbar: string;
@@ -50,6 +52,8 @@ export interface SeedOptions {
 
 /** What the sign screen needs, plus the ids the posting produced. */
 export interface SeededOrder extends OrderForSigning {
+  /** Where the envelope went, and where claims go. Not where the verdict goes. */
+  readonly ordersTopicId: string;
   readonly transactionIds: {
     readonly lockFunds: string;
     readonly submitEnvelope: string;
@@ -104,7 +108,8 @@ export async function seedClaimedReviewOrder(
   return {
     envelope,
     escrowAccountId: escrow.escrowAccountId,
-    topicId: options.ordersTopicId,
+    ordersTopicId: options.ordersTopicId,
+    attestationsTopicId: options.attestationsTopicId,
     transactionIds: {
       lockFunds: escrow.transactionId,
       submitEnvelope: published.transactionId,

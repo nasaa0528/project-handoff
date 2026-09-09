@@ -6,6 +6,7 @@ import { notesToBytes, sha256HexOfBytes } from "../sign/notes";
 import { TestnetOrderSource, tryDecodeReviewOrder } from "./testnetOrders";
 
 const TOPIC = "0.0.4242";
+const ATT_TOPIC = "0.0.4243";
 const EXPERT = "0.0.12345";
 const RIVAL = "0.0.99999";
 const ESCROW = "0.0.999";
@@ -75,7 +76,8 @@ describe("TestnetOrderSource", () => {
       message(4, at(3), "0.0.5", "{\"not\":\"an order\"}"),
       message(5, at(4), "0.0.5", encodeEnvelope(open)),
     ]);
-    const source = new TestnetOrderSource({ chain, content, ordersTopicId: TOPIC, escrowAccountId: ESCROW, expertAccountId: EXPERT, now: () => (T0 + 10) * 1000 });
+    const source = new TestnetOrderSource({ chain, content, ordersTopicId: TOPIC,
+    attestationsTopicId: ATT_TOPIC, escrowAccountId: ESCROW, expertAccountId: EXPERT, now: () => (T0 + 10) * 1000 });
     const entries = await source.list();
     expect(entries.map((e) => [e.order.envelope.order_id, e.claim.kind])).toEqual([
       ["ord_open", "open"],
@@ -91,7 +93,8 @@ describe("TestnetOrderSource", () => {
     const { content, envelope } = await fixtures();
     const order = envelope("ord_x");
     const { chain } = fakeChain([message(1, at(0), "0.0.5", encodeEnvelope({ ...order, spec_hash: "f".repeat(64) }))]);
-    const source = new TestnetOrderSource({ chain, content, ordersTopicId: TOPIC, escrowAccountId: ESCROW, expertAccountId: EXPERT });
+    const source = new TestnetOrderSource({ chain, content, ordersTopicId: TOPIC,
+    attestationsTopicId: ATT_TOPIC, escrowAccountId: ESCROW, expertAccountId: EXPERT });
     const [entry] = await source.list();
     expect(entry?.order.ask).toContain("not in the content store yet");
     expect(entry?.order.title).toBe("Order ord_x");
@@ -101,7 +104,8 @@ describe("TestnetOrderSource", () => {
     const { content, envelope } = await fixtures();
     const order = envelope("ord_open");
     const { chain, submitted } = fakeChain([message(1, at(0), "0.0.5", encodeEnvelope(order))]);
-    const source = new TestnetOrderSource({ chain, content, ordersTopicId: TOPIC, escrowAccountId: ESCROW, expertAccountId: EXPERT, now: () => (T0 + 200) * 1000 });
+    const source = new TestnetOrderSource({ chain, content, ordersTopicId: TOPIC,
+    attestationsTopicId: ATT_TOPIC, escrowAccountId: ESCROW, expertAccountId: EXPERT, now: () => (T0 + 200) * 1000 });
     const [entry] = await source.list();
     if (entry === undefined) throw new Error("no order");
 
