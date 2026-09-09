@@ -149,7 +149,10 @@ sits there.
   service key never reaches this app, so something server-side must answer that URL;
   that is the open ask to P1/P2, and until it exists testnet mode reads the topic and
   shows "not in the content store yet" for the ask.
-- Testnet needs `VITE_HANDOFF_ORDERS_TOPIC_ID`, `VITE_CONTENT_URL` and
-  `VITE_HANDOFF_ESCROW_ACCOUNT_ID`; `VITE_HEDERA_MIRROR_NODE_URL` is optional and
-  defaults to the public testnet mirror. A URL that mentions mainnet refuses to boot.
+- Testnet needs `VITE_HANDOFF_ORDERS_TOPIC_ID`, `VITE_HANDOFF_ATTESTATIONS_TOPIC_ID`,
+  `VITE_CONTENT_URL` and `VITE_HANDOFF_ESCROW_ACCOUNT_ID`; `VITE_HEDERA_MIRROR_NODE_URL`
+  is optional and defaults to the public testnet mirror. A URL that mentions mainnet
+  refuses to boot. The two topic ids are different topics and both are required, so a
+  missing attestations topic stops the app booting rather than sending the verdict
+  somewhere nobody reads.
 
