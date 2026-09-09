@@ -18,7 +18,7 @@
  * test fixture, per the cutover rule.
  */
 
-import type { ContentStoreAdapter } from "@handoff/content";
+import { ContentStoreError, readVerifiedByHash, type ContentStoreAdapter } from "@handoff/content";
 
 export interface ContentStore {
   /**
@@ -29,6 +29,16 @@ export interface ContentStore {
    * @returns an opaque reference for fetching it back
    */
   put(hash: string, bytes: Uint8Array): Promise<string>;
+
+  /**
+   * The bytes behind a hash, or null when the store has nothing for it.
+   *
+   * Read back rather than written: the expert app is a browser build and
+   * cannot hold the store's credentials, so this process answers for it. Same
+   * signature as the port in `apps/web/src/content.ts`, so the two agree about
+   * what "missing" means — null, never an empty buffer, never a throw.
+   */
+  get(hash: string): Promise<Uint8Array | null>;
 }
 
 export class InMemoryContentStore implements ContentStore {
@@ -41,9 +51,8 @@ export class InMemoryContentStore implements ContentStore {
     return `memory://${hash}`;
   }
 
-  /** Test-only. */
-  get(hash: string): Uint8Array | undefined {
-    return this.#objects.get(hash);
+  async get(hash: string): Promise<Uint8Array | null> {
+    return this.#objects.get(hash) ?? null;
   }
 
   /** Test-only. */
@@ -77,6 +86,26 @@ export function contentStore(adapter: ContentStoreAdapter): ContentStore {
         );
       }
       return stored.storageKey;
+    },
+
+    async get(hash: string): Promise<Uint8Array | null> {
+      try {
+        // Verified, not fetched. `readVerifiedByHash` recomputes the hash with
+        // the same hasher the envelope used and refuses bytes that do not
+        // match, which is hard rule 1 read from the other end: the on-chain
+        // hash is the commitment, so content that fails it is not this
+        // order's content and must not reach a screen.
+        return await readVerifiedByHash(adapter, hash);
+      } catch (error) {
+        // A missing object and corrupted bytes are different answers. Only the
+        // first is null; a mismatch carries its own error type and is left to
+        // the caller, which reports it rather than pretending the object was
+        // never stored.
+        if (error instanceof ContentStoreError && error.name === "ContentStoreError") {
+          return null;
+        }
+        throw error;
+      }
     },
   };
 }

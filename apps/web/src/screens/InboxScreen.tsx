@@ -38,14 +38,11 @@ export function InboxScreen({
 
   return (
     <div className="grid gap-4">
-      <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-base font-semibold tracking-tight">Work you can take</h2>
-        {others > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {others} claimed by {others === 1 ? "someone else" : "others"}
-          </span>
-        )}
-      </div>
+      {others > 0 && (
+        <p className="text-right text-xs text-muted-foreground">
+          {others} claimed by {others === 1 ? "someone else" : "others"}
+        </p>
+      )}
 
       {takeable.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">No work right now.</p>

@@ -12,9 +12,15 @@ import { createX402Signer } from "@handoff/chain";
 import { preflight } from "../preflight.js";
 import type { CertTagOption } from "../config.js";
 
-const baseUrl = process.env["HANDOFF_SERVICE_URL"]?.trim() ?? "http://localhost:4021";
+// `||`, not `??`: `.env.example` ships these keys with an empty value, and an
+// empty string is a set variable. Under `??` the default never fires and the
+// base url becomes "", which fails every fetch with "Failed to parse URL from
+// /tags" — a message that names neither the variable nor the file. The
+// resource-server half in ../config.ts already reads it this way, and its
+// comment says one variable moves both.
+const baseUrl = process.env["HANDOFF_SERVICE_URL"]?.trim() || "http://localhost:4021";
 const mirrorNodeUrl =
-  process.env["HEDERA_MIRROR_NODE_URL"]?.trim() ?? "https://testnet.mirrornode.hedera.com/api/v1";
+  process.env["HEDERA_MIRROR_NODE_URL"]?.trim() || "https://testnet.mirrornode.hedera.com/api/v1";
 
 // stderr, because stdout is the JSON-RPC channel.
 console.error(`handoff_verify -> ${baseUrl}`);

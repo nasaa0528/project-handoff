@@ -32,9 +32,20 @@ export class HcsMessageTooLargeError extends Error {
   }
 }
 
-/** Canonicalizes first (same bytes a hash would see), then checks the wire size. */
+/**
+ * The bytes that go on the topic, checked against the wire size.
+ *
+ * A string is already the wire form: `ChainAdapter.submitMessage(topicId,
+ * contents)` hands over an envelope, claim or attestation that the schema
+ * package encoded and bounded, and readers on the other end `JSON.parse` the
+ * topic message and expect an object. Canonicalizing a string would JSON-encode
+ * it a second time and put a quoted string on the topic, which every treaty
+ * decoder rejects; that is what happened to the first real order on testnet.
+ * Anything that is not a string is canonicalized here, which is what the
+ * provisioning scripts rely on when they publish a probe object.
+ */
 export function assertWithinHcsMessageLimit(payload: unknown): string {
-  const canonical = canonicalize(payload);
+  const canonical = typeof payload === "string" ? payload : canonicalize(payload);
   const size = byteLength(canonical);
   if (size > HCS_MESSAGE_MAX_BYTES) {
     throw new HcsMessageTooLargeError(size, HCS_MESSAGE_MAX_BYTES);

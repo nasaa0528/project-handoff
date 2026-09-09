@@ -104,7 +104,7 @@ describe("packageReviewOrder", () => {
     expect(packaged.envelope.spec_hash).toBe(sha256Hex(new TextEncoder().encode(SPEC)));
     expect(packaged.envelope.artifact_hash_in).toBe(sha256Hex(ARTIFACT));
     expect(content.size).toBe(2);
-    expect(content.get(packaged.envelope.artifact_hash_in)).toEqual(ARTIFACT);
+    expect(await content.get(packaged.envelope.artifact_hash_in)).toEqual(ARTIFACT);
     expect(packaged.specRef).toContain(packaged.envelope.spec_hash);
   });
 

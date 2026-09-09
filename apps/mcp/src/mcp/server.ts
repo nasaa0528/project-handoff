@@ -47,6 +47,16 @@ export interface McpDeps {
    * server refuses one too, at parse time — two layers reading one list.
    */
   readonly certTags: readonly CertTagOption[];
+  /**
+   * The account that pays the service fee, and therefore the account that
+   * funds the escrow. Sent as `requester_account_id`, which the resource
+   * server requires and then re-derives from the payment before trusting it.
+   *
+   * Optional for the same reason `preflight` is: a session with no payer still
+   * gets both tools, and ordering fails at the signer with the price in the
+   * message rather than at a missing field.
+   */
+  readonly requesterAccountId?: string;
 }
 
 function tagDescription(tags: readonly CertTagOption[]): string {
@@ -138,6 +148,9 @@ export function createMcpServer(deps: McpDeps): McpServer {
           {
             baseUrl: deps.baseUrl,
             signer: deps.signer,
+            ...(deps.requesterAccountId === undefined
+              ? {}
+              : { requesterAccountId: deps.requesterAccountId }),
             ...(deps.preflight === undefined ? {} : { preflight: deps.preflight }),
           },
         )) as PostedBody & Record<string, unknown>;

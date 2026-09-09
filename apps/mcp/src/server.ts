@@ -16,7 +16,7 @@
  */
 
 import * as z from "zod";
-import { hbarToTinybars, Utc, type ChainAdapter } from "@handoff/schema";
+import { hbarToTinybars, sha256Hex, Utc, type ChainAdapter } from "@handoff/schema";
 import type { ContentStore } from "./content.js";
 import { postReviewOrder } from "./order.js";
 import { gate, headerLookup, settle, type GateConfig } from "./x402/gate.js";
@@ -29,13 +29,26 @@ export interface HttpRequest {
   readonly method: string;
   readonly path: string;
   readonly headers: Readonly<Record<string, string | undefined>>;
-  readonly body: string;
+  /**
+   * The body as it arrived.
+   *
+   * Bytes rather than a string because the content endpoint is addressed by
+   * the sha-256 of exactly these bytes, and a utf8 round trip is not the
+   * identity function for every input. Everything else decodes at the one
+   * place that parses JSON.
+   */
+  readonly body: Buffer;
 }
 
 export interface HttpResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: unknown;
+  /**
+   * Bytes to write instead of JSON, for the content reads. When this is set
+   * `body` is ignored, so the two never disagree about what was served.
+   */
+  readonly bytes?: Uint8Array;
 }
 
 export interface ServerDeps {
@@ -95,6 +108,25 @@ const OrderRequestBody = z.strictObject({
 
 const json = { "Content-Type": "application/json" } as const;
 
+/**
+ * The expert app runs on its own origin and reads content from this one, so
+ * the browser needs to be told that is allowed. `*` is the honest value: the
+ * resource is already public to anyone holding the hash, and the hashes are on
+ * a public topic.
+ */
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
+  "Access-Control-Allow-Headers": "content-type",
+} as const;
+
+/**
+ * What a PUT may store. Notes are a few kilobytes; the artifact arrives with
+ * the order, not through here. Small enough that filling the store is tedious,
+ * large enough that no honest write hits it.
+ */
+export const CONTENT_PUT_MAX_BYTES = 256 * 1024;
+
 export async function handle(request: HttpRequest, deps: ServerDeps): Promise<HttpResponse> {
   // Deliberately free and deliberately not a payment surface. It says the
   // process is up, nothing about the chain or the facilitator, so it cannot
@@ -111,6 +143,89 @@ export async function handle(request: HttpRequest, deps: ServerDeps): Promise<Ht
       return { status: 405, headers: { ...json, Allow: "GET" }, body: { error: "use GET" } };
     }
     return { status: 200, headers: json, body: { tags: deps.certTags } };
+  }
+
+  // Content, addressed by the hash the envelope committed to. Free and
+  // unauthenticated, decided in
+  // docs/decisions/2026-09-09-content-reads-are-by-hash-and-unauthenticated.md:
+  // the expert app is a browser build and cannot hold the store's credentials,
+  // so this process answers for it. Anyone holding the hash can read the
+  // bytes, and the hashes are on a public topic — certification routes an
+  // order, it does not keep the document secret. Every demo artifact is
+  // fabricated for that reason (hard rule 7).
+  const contentPath = /^\/content\/([0-9a-f]{64})$/.exec(request.path);
+  if (contentPath !== null) {
+    const hash = contentPath[1] ?? "";
+
+    // The expert app is served from another origin, so the browser preflights
+    // the PUT before it is allowed to send one.
+    if (request.method === "OPTIONS") {
+      return { status: 204, headers: { ...cors, "Access-Control-Max-Age": "86400" }, body: null };
+    }
+
+    if (request.method === "GET") {
+      let bytes: Uint8Array | null;
+      try {
+        bytes = await deps.content.get(hash);
+      } catch (error) {
+        // The store had something and it does not hash to what was asked for.
+        // Saying "not found" would be a lie that hides a broken commitment.
+        return {
+          status: 502,
+          headers: { ...json, ...cors },
+          body: { error: "the stored content does not match its hash", hash },
+        };
+      }
+      if (bytes === null) {
+        return { status: 404, headers: { ...json, ...cors }, body: { error: "no content under that hash" } };
+      }
+      return {
+        status: 200,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          // Content-addressed, so these bytes can never change under this URL.
+          "Cache-Control": "public, max-age=31536000, immutable",
+          ...cors,
+        },
+        body: null,
+        bytes,
+      };
+    }
+
+    if (request.method === "PUT") {
+      if (request.body.byteLength > CONTENT_PUT_MAX_BYTES) {
+        return {
+          status: 413,
+          headers: { ...json, ...cors },
+          body: { error: `content over ${CONTENT_PUT_MAX_BYTES} bytes`, limit: CONTENT_PUT_MAX_BYTES },
+        };
+      }
+      // The whole authorization story, and it is enough to stop one thing:
+      // nobody can replace content with different content, because the bytes
+      // have to be what the path already says they are. It does not stop
+      // somebody filling the store with hash-valid noise, which is what the
+      // cap above is for.
+      const actual = sha256Hex(request.body);
+      if (actual !== hash) {
+        return {
+          status: 400,
+          headers: { ...json, ...cors },
+          body: { error: "the body does not hash to the hash in the path", expected: hash, actual },
+        };
+      }
+      try {
+        await deps.content.put(hash, request.body);
+      } catch {
+        // Caught rather than left to the catch-all in http.ts, which answers
+        // with the thrown message. The store's messages name the bucket and
+        // the vendor's own error text, and this endpoint is reachable by
+        // anyone; the caller can act on "it did not store" and nothing more.
+        return { status: 502, headers: { ...json, ...cors }, body: { error: "the content store did not take it" } };
+      }
+      return { status: 200, headers: { ...json, ...cors }, body: { hash } };
+    }
+
+    return { status: 405, headers: { ...json, ...cors, Allow: "GET, PUT, OPTIONS" }, body: { error: "use GET or PUT" } };
   }
 
   // Reads are ungated by decision. Everything returned here is already on a
@@ -165,7 +280,7 @@ export async function handle(request: HttpRequest, deps: ServerDeps): Promise<Ht
     return { status: outcome.status, headers: outcome.headers, body: outcome.body };
   }
 
-  const parsed = OrderRequestBody.safeParse(parseJson(request.body));
+  const parsed = OrderRequestBody.safeParse(parseJson(request.body.toString("utf8")));
   if (!parsed.success) {
     // Paid but unusable. We have not settled, so nothing was taken.
     return {

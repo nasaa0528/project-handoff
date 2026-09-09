@@ -126,3 +126,67 @@ with its own verdict. The earlier failure mode was a **local** rejection —
 expecting x402 version 1's top-level `scheme` and `network`. See
 `x402-blocky402-wire-verified.md`, which was itself wrong about that shape and is now
 corrected.
+
+## The payer must be the operator, until the requester-signed lock ships
+
+Measured 2026-09-09, running the stdio MCP process against a local resource server on
+`HANDOFF_CHAIN=testnet`. Every teammate about to test `handoff_verify` from their own
+machine hits this, and the error names none of it.
+
+`lockFunds` debits `params.requesterAccountId` and signs with the adapter's client — the
+server's operator (`packages/chain/src/escrow.ts`, `fundEscrow`). Since PR #27 the
+requester account is the x402 payer, taken from the payment rather than from our env. So
+whenever the payer and the operator are different accounts, the escrow transfer is
+debited from an account that never signed it:
+
+```
+the order did not post: receipt for transaction 0.0.10376667@1788952250.864262800
+contained error status INVALID_SIGNATURE
+```
+
+**Nothing was charged.** The order posts before settlement, so a lock that fails returns
+502 and the fee is left unsettled — verified in `apps/mcp/src/server.ts`, which returns
+without calling `settle` when `postReviewOrder` throws.
+
+**Two shapes follow, and only one of them works today.**
+
+- **One shared resource server, many payers: impossible on `main`.** A teammate pointing
+  `HANDOFF_SERVICE_URL` at somebody else's server fails at the lock every time. This is
+  what `buildFundLock`/`submitFundLock` exists to fix — the requester signs the transfer
+  on their own machine — and porting `apps/mcp` to it is the open P2 task from
+  `../decisions/2026-09-08-requester-signs-the-fund-lock.md`.
+- **Each teammate runs their own resource server, with the payer equal to the operator:
+  works.** Set `X402_PAYER_ACCOUNT_ID` = `HEDERA_ACCOUNT_ID` and `X402_PAYER_PRIVATE_KEY`
+  = `HEDERA_PRIVATE_KEY`. The account must be **ECDSA** — the x402 signer refuses ED25519
+  and the portal's default is ED25519.
+
+Proved end to end under the second shape, all three on the mirror node:
+
+| Leg | Transaction | Effect |
+|---|---|---|
+| Service fee | `0.0.7162784@1788952342.542783001` | `0.0.10376667` → `0.0.10376656`, 0.5 HBAR, facilitator paid the gas |
+| Fund lock | `0.0.10376667@1788952343.193594087` | `0.0.10376667` → escrow `0.0.10422187`, 1 HBAR |
+| Envelope | `0.0.10376667@1788952344.655781678` | topic `0.0.10421643`, seq 4, hashes only |
+
+That escrow is still the **dev** account from `provision-dev-escrow.ts`, not P1's shared
+one. Four laptops each holding a different `HANDOFF_ESCROW_ACCOUNT_ID` means four
+escrows and an expert app reading orders it cannot be paid from: agree one id before
+anyone tests.
+
+## Two wiring bugs the unit tests could not see
+
+Both were found by driving the real tool over a real transport rather than by reading it.
+
+1. **`handoff_verify` posted no `requester_account_id` at all**, so every order came back
+   `400 invalid order`. `main.ts` read the payer and `client.ts` sent the field, and the
+   tool handler in between built its `postOrder` deps by hand and left it out. Each half
+   was tested alone and both were green. `apps/mcp/src/mcp/server.test.ts` now drives the
+   tool over an `InMemoryTransport` and reads the body that would go on the wire.
+2. **An empty `HANDOFF_SERVICE_URL` is a set variable.** `.env.example` ships the key
+   empty, and `main.ts` read it with `??`, so the default never fired and the base url
+   became `""` — every call failing with `Failed to parse URL from /tags`, a message
+   naming neither the variable nor the file. `config.ts` had always used `||`; the two
+   halves had drifted apart under a comment claiming one variable moved both.
+
+**Rule.** For any env var `.env.example` ships with an empty value, read it with `||`,
+never `??`. `??` defends against unset; the file makes it set.

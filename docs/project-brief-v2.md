@@ -352,7 +352,12 @@ expert web app itself; custodial key management is a weeks-scale project.
 - **Content availability is centralized** (Supabase). Signed URLs are access control —
   they re-issue; the object persists — but the store itself is one vendor. Pinning /
   replication (IPFS) is roadmap. The on-chain hash is the commitment; parties keep
-  their own copies.
+  their own copies. **This week the content read is unauthenticated**: `GET
+  /content/{sha256}` serves anyone holding the hash, and the hashes are on a public
+  topic, so certification routes an order without keeping the document secret. Every
+  demo artifact is fabricated for that reason. Signed URLs per confirmed claim are the
+  production answer and are not wired
+  (`docs/decisions/2026-09-09-content-reads-are-by-hash-and-unauthenticated.md`).
 - **Hashscan is a viewer, not a dependency** — attestations live on HCS, retrievable
   from any mirror node; the apps read mirror nodes directly.
 - **Known limits win in public copy** over every other document, including this brief's

@@ -52,6 +52,6 @@ describe("InMemoryContentStore", () => {
     await store.put(HASH, BYTES);
 
     expect(store.size).toBe(1);
-    expect(store.get(HASH)).toEqual(BYTES);
+    expect(await store.get(HASH)).toEqual(BYTES);
   });
 });

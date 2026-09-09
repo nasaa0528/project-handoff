@@ -146,9 +146,11 @@ sits there.
   from the escrow. Read directly from the mirror node, which is allowed; Hashscan is not.
 - Content is `HttpContentStore`: `GET {VITE_CONTENT_URL}/{sha256}` for the ask and the
   document, `PUT` for the notes, every read checked against its hash. The Supabase
-  service key never reaches this app, so something server-side must answer that URL;
-  that is the open ask to P1/P2, and until it exists testnet mode reads the topic and
-  shows "not in the content store yet" for the ask.
+  service key never reaches this app, so something server-side answers that URL: it is
+  `apps/mcp`, at `/content/{sha256}`, so `VITE_CONTENT_URL=http://localhost:4021/content`
+  against a local resource server. Free, unauthenticated and CORS-open, decided in
+  `../../docs/decisions/2026-09-09-content-reads-are-by-hash-and-unauthenticated.md`; a
+  `PUT` is refused unless the body hashes to the path, and capped at 256KB.
 - Testnet needs `VITE_HANDOFF_ORDERS_TOPIC_ID`, `VITE_HANDOFF_ATTESTATIONS_TOPIC_ID`,
   `VITE_CONTENT_URL` and `VITE_HANDOFF_ESCROW_ACCOUNT_ID`; `VITE_HEDERA_MIRROR_NODE_URL`
   is optional and defaults to the public testnet mirror. A URL that mentions mainnet

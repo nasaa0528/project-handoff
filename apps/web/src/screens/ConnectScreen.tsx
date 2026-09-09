@@ -356,8 +356,9 @@ export function ConnectCard({
               </p>
               <Helper id="connect-key-help">
                 Your private key is your signature. It stays in this tab, in memory only: not saved, not sent
-                anywhere, never shown, forgotten when you disconnect or close the tab. It signs your verdict and
-                nothing else. It is never a schedule key, so it cannot touch the money in escrow.
+                anywhere, never shown, forgotten when you disconnect, reload or close the tab. Your account id is
+                remembered; the key is asked for again. It signs your verdict and nothing else. It is never a
+                schedule key, so it cannot touch the money in escrow.
               </Helper>
             </div>
           ) : (

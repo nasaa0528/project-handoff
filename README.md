@@ -153,11 +153,52 @@ pnpm typecheck && pnpm test         # what CI runs, plus a gitleaks scan
 facilitator. It is not a unit test on purpose: CI should not go red because somebody else's
 service is down.
 
-**Where this is, as of the last commit to this file.** The gate is live end to end up to
-the point of signing: the 402 quotes a fee payer fetched from the real facilitator, and a
-malformed payment comes back with the facilitator's own rejection reason. The client-side
-signer and the real chain adapter are the two pieces still landing. This paragraph is the
-first thing to correct when they do.
+**Where this is, as of the last commit to this file.** The whole requester path runs on
+testnet: an agent calls `handoff_verify`, the service fee settles through the live
+facilitator, the order value locks in escrow and the envelope reaches the orders topic,
+each with a transaction id you can read on a mirror node. The expert path claims, reviews
+and signs. What is not wired is the payout: `createSchedule` tracks it in memory rather
+than creating a Hedera schedule, so an attestation is published and paid by hand.
+
+## Ordering from your own agent
+
+Every seat can post a real order from their own machine. Two processes and a one-time
+registration.
+
+**Fill in `.env` first.** Beyond your own account, four values have to match everyone
+else's or you will be alone on your own chain: `HANDOFF_ORDERS_TOPIC_ID`,
+`HANDOFF_ATTESTATIONS_TOPIC_ID`, `HANDOFF_ESCROW_ACCOUNT_ID` and
+`X402_RECEIVER_ACCOUNT_ID`. Ask P1 rather than provisioning your own. `HANDOFF_CHAIN`
+ships as `mock` and has to say `testnet`. The two platform keys and the Supabase service
+key are vault-only.
+
+**Your x402 payer must be the same account as your operator.** `X402_PAYER_ACCOUNT_ID` =
+`HEDERA_ACCOUNT_ID`, same key, and it must be **ECDSA**. This is a limitation, not a
+design: the escrow transfer is debited from the requester and signed by the server's
+operator, so two different accounts is `INVALID_SIGNATURE` at the fund lock. Nothing is
+charged when that happens — the order posts before settlement, so the fee stays
+unsettled. It goes away when `buildFundLock`/`submitFundLock` land in `apps/mcp`
+(`docs/decisions/2026-09-08-requester-signs-the-fund-lock.md`), and until then one
+resource server per developer is the only shape that works. The gotchas behind this are
+in `docs/research/x402-first-paid-request.md`.
+
+```bash
+pnpm --filter @handoff/mcp start        # leave it running: the resource server, :4021
+
+claude mcp add handoff --scope local -- \
+  "$(which node)" --env-file="$PWD/.env" \
+  "$PWD/node_modules/.pnpm/tsx@4.23.13/node_modules/tsx/dist/cli.mjs" \
+  "$PWD/apps/mcp/src/mcp/main.ts"
+```
+
+Absolute paths, because the client starts this process from its own working directory,
+and `--env-file` because nothing in the process reads `.env` on its own. Then restart the
+session: the tools appear at startup, never mid-session. `handoff_verify` posts an order
+and `handoff_status` reads one back.
+
+Check stderr before ordering. `x402 payer: 0.0.…` means the key parsed and the curve is
+right; `payment signer: none` or `x402 payer unavailable` names which. `credentials:
+cpa-us` means the resource server answered, so it is running and you are pointed at it.
 
 ## Known limits
 

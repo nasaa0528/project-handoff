@@ -22,7 +22,7 @@ export class BodyTooLargeError extends Error {
   }
 }
 
-export async function readBody(request: IncomingMessage): Promise<string> {
+export async function readBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
 
@@ -35,12 +35,26 @@ export async function readBody(request: IncomingMessage): Promise<string> {
     chunks.push(buffer);
   }
 
-  return Buffer.concat(chunks).toString("utf8");
+  // Bytes, not a string. The content endpoint hands back what it was given and
+  // both sides check the sha-256, so a utf8 round trip here would be a way to
+  // fail that check on content nobody edited.
+  return Buffer.concat(chunks);
 }
 
 function send(response: ServerResponse, status: number, headers: Readonly<Record<string, string>>, body: unknown): void {
   response.writeHead(status, headers);
   response.end(JSON.stringify(body));
+}
+
+/** Bytes as they are. Content is addressed by its hash, so encoding it would change it. */
+function sendBytes(
+  response: ServerResponse,
+  status: number,
+  headers: Readonly<Record<string, string>>,
+  bytes: Uint8Array,
+): void {
+  response.writeHead(status, { ...headers, "Content-Length": String(bytes.byteLength) });
+  response.end(Buffer.from(bytes));
 }
 
 export interface HttpServerOptions {
@@ -63,6 +77,10 @@ export function createHttpServer(deps: ServerDeps, options: HttpServerOptions = 
 
         const result = await handle(request, deps);
         log(`${request.method} ${request.path} -> ${result.status}`);
+        if (result.bytes !== undefined) {
+          sendBytes(response, result.status, result.headers, result.bytes);
+          return;
+        }
         send(response, result.status, result.headers, result.body);
       } catch (error) {
         if (error instanceof BodyTooLargeError) {

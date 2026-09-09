@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { MockChainAdapter, type LockFundsParams } from "@handoff/schema";
+import { MockChainAdapter, sha256Hex, type LockFundsParams } from "@handoff/schema";
 import { InMemoryContentStore } from "./content.js";
-import { handle, type HttpRequest, type ServerDeps } from "./server.js";
+import { ContentHashMismatchError } from "@handoff/content";
+import { handle, CONTENT_PUT_MAX_BYTES, type HttpRequest, type ServerDeps } from "./server.js";
 import { Facilitator, type FetchLike } from "./x402/facilitator.js";
 import {
   buildRequirements,
@@ -94,7 +95,7 @@ function futureUtc(seconds: number): string {
 }
 
 function post(headers: Record<string, string | undefined>, body: string): HttpRequest {
-  return { method: "POST", path: "/orders", headers, body };
+  return { method: "POST", path: "/orders", headers, body: Buffer.from(body, "utf8") };
 }
 
 describe("POST /orders", () => {
@@ -296,7 +297,7 @@ describe("free read paths", () => {
   it("lists the credential tags without asking for payment", async () => {
     const { deps, paths } = harness();
 
-    const response = await handle({ method: "GET", path: "/tags", headers: {}, body: "" }, deps);
+    const response = await handle({ method: "GET", path: "/tags", headers: {}, body: Buffer.alloc(0) }, deps);
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ tags: [{ code: "cpa-us", label: "Licensed reviewer" }] });
@@ -312,7 +313,7 @@ describe("free read paths", () => {
     const orderId = (posted.body as { order_id: string }).order_id;
 
     const read = await handle(
-      { method: "GET", path: `/orders/${orderId}`, headers: {}, body: "" },
+      { method: "GET", path: `/orders/${orderId}`, headers: {}, body: Buffer.alloc(0) },
       deps,
     );
 
@@ -329,7 +330,7 @@ describe("free read paths", () => {
     const { deps } = harness();
 
     const read = await handle(
-      { method: "GET", path: "/orders/ord_nothing", headers: {}, body: "" },
+      { method: "GET", path: "/orders/ord_nothing", headers: {}, body: Buffer.alloc(0) },
       deps,
     );
 
@@ -345,7 +346,7 @@ describe("free read paths", () => {
     const posted = await handle(post({ [PAYMENT_SIGNATURE_HEADER]: paidHeader() }, orderBody()), deps);
     const orderId = (posted.body as { order_id: string }).order_id;
     const read = await handle(
-      { method: "GET", path: `/orders/${orderId}`, headers: {}, body: "" },
+      { method: "GET", path: `/orders/${orderId}`, headers: {}, body: Buffer.alloc(0) },
       deps,
     );
 
@@ -479,5 +480,115 @@ describe("credential tag routing", () => {
     expect((response.body as { service_fee: { amount_tinybars: string } }).service_fee.amount_tinybars).toBe(
       GATE_CONFIG.feeTinybars,
     );
+  });
+});
+
+describe("content, addressed by hash", () => {
+  const BYTES = Buffer.from("FAKE report. Total 11,900.", "utf8");
+  const HASH = sha256Hex(BYTES);
+
+  function content(method: string, hash: string, body: Buffer = Buffer.alloc(0)): HttpRequest {
+    return { method, path: `/content/${hash}`, headers: {}, body };
+  }
+
+  it("serves the stored bytes back exactly, not as JSON", async () => {
+    const { deps } = harness();
+    await handle(content("PUT", HASH, BYTES), deps);
+
+    const read = await handle(content("GET", HASH), deps);
+
+    expect(read.status).toBe(200);
+    // The expert app hashes what it receives and refuses a mismatch, so the
+    // bytes have to survive the trip unchanged. A JSON-encoded body would not.
+    expect(Buffer.from(read.bytes ?? new Uint8Array())).toEqual(BYTES);
+    expect(sha256Hex(read.bytes ?? new Uint8Array())).toBe(HASH);
+    expect(read.headers["Content-Type"]).toBe("application/octet-stream");
+  });
+
+  it("refuses a body that does not hash to the path", async () => {
+    const { deps, content: store } = harness();
+
+    const written = await handle(content("PUT", HASH, Buffer.from("something else", "utf8")), deps);
+
+    expect(written.status).toBe(400);
+    // The whole of the authorization story: content cannot be replaced with
+    // different content, because the bytes must be what the path says.
+    expect(store.size).toBe(0);
+  });
+
+  it("takes the same bytes twice without complaint", async () => {
+    const { deps, content: store } = harness();
+
+    expect((await handle(content("PUT", HASH, BYTES), deps)).status).toBe(200);
+    expect((await handle(content("PUT", HASH, BYTES), deps)).status).toBe(200);
+
+    expect(store.size).toBe(1);
+  });
+
+  it("refuses more than the cap, before storing any of it", async () => {
+    const { deps, content: store } = harness();
+    const big = Buffer.alloc(CONTENT_PUT_MAX_BYTES + 1, 0x61);
+
+    const written = await handle(content("PUT", sha256Hex(big), big), deps);
+
+    expect(written.status).toBe(413);
+    expect(store.size).toBe(0);
+  });
+
+  it("says not found rather than serving nothing as something", async () => {
+    const { deps } = harness();
+
+    const read = await handle(content("GET", sha256Hex(Buffer.from("never stored"))), deps);
+
+    expect(read.status).toBe(404);
+    expect(read.bytes).toBeUndefined();
+  });
+
+  it("answers the browser's preflight, because the expert app is another origin", async () => {
+    const { deps } = harness();
+
+    const preflight = await handle(content("OPTIONS", HASH), deps);
+
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers["Access-Control-Allow-Origin"]).toBe("*");
+    expect(preflight.headers["Access-Control-Allow-Methods"]).toContain("PUT");
+    expect(preflight.headers["Access-Control-Allow-Headers"]).toContain("content-type");
+  });
+
+  it("does not treat a path that is not a hash as content", async () => {
+    const { deps } = harness();
+
+    const read = await handle({ method: "GET", path: "/content/nope", headers: {}, body: Buffer.alloc(0) }, deps);
+
+    expect(read.status).toBe(404);
+  });
+
+  it("does not hand the store's own error text to an anonymous caller", async () => {
+    const { deps } = harness();
+    const store = {
+      put: async () => {
+        throw new Error("Supabase upload failed for handoff-content: bucket not found");
+      },
+      get: async () => null,
+    };
+
+    const written = await handle(content("PUT", HASH, BYTES), { ...deps, content: store });
+
+    expect(written.status).toBe(502);
+    expect(JSON.stringify(written.body)).not.toContain("Supabase");
+  });
+
+  it("reports corrupted bytes as a broken commitment, never as a miss", async () => {
+    const { deps } = harness();
+    const store = {
+      put: async () => "memory://x",
+      get: async () => {
+        throw new ContentHashMismatchError(HASH, sha256Hex(Buffer.from("other")));
+      },
+    };
+
+    const read = await handle(content("GET", HASH), { ...deps, content: store });
+
+    expect(read.status).toBe(502);
   });
 });
