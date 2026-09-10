@@ -196,6 +196,7 @@ packages/schema     P4 Nasaa      types, envelopes, attestation, money, hashing,
 packages/chain      P1 Khishgee   escrow, co-signed payout + early-execute, HCS, mirror reads
 packages/content    P1 Khishgee   Supabase adapter behind a storage interface
 packages/accounts   P1 Khishgee   registration and sign-in, keyed on the Hedera account id (MongoDB)
+packages/accounts-client  P1 Khishgee   browser-safe client for the accounts API, consumed by apps/web
 apps/web            P3 Jack       expert app: inbox, review workspace, sign
 apps/mcp            P2 Tseegii    handoff_verify server
 apps/requester      P2 Tseegii    demo requester session via Hedera Agent Kit
