@@ -195,9 +195,11 @@ One pnpm workspace. Libraries in `packages/`, deployables in `apps/`.
 packages/schema     P4 Nasaa      types, envelopes, attestation, money, hashing, ChainAdapter + MockChainAdapter
 packages/chain      P1 Khishgee   escrow, schedule + early-execute, HCS, mirror reads
 packages/content    P1 Khishgee   Supabase adapter behind a storage interface
+packages/accounts   P1 Khishgee   registration and sign-in, keyed on the Hedera account id (MongoDB)
 apps/web            P3 Jack       expert app: inbox, review workspace, sign
 apps/mcp            P2 Tseegii    handoff_verify server
 apps/requester      P2 Tseegii    demo requester session via Hedera Agent Kit
+apps/accounts-api   P1 Khishgee   REST API over packages/accounts
 ```
 
 Two constraints that hold regardless of how anything else moves:
