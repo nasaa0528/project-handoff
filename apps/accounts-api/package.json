@@ -1,0 +1,21 @@
+{
+  "name": "@handoff/accounts-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@handoff/accounts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "tsx": "^4.23.13",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
+  }
+}
