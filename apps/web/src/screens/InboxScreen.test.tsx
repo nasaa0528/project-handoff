@@ -4,15 +4,17 @@ import type { InboxEntry } from "../orders/order";
 import { expectNoBannedWords, NOW, order, SIGN_BY, utc } from "./fixtures";
 import { firstLine, InboxScreen } from "./InboxScreen";
 
-const open: InboxEntry = { order: order(), claim: { kind: "open" } };
+const open: InboxEntry = { order: order(), claim: { kind: "open" }, delivered: null };
 const yours: InboxEntry = {
   order: order({ title: "Mine already" }),
   claim: { kind: "yours", claimedAtEpochSeconds: 0, signBy: SIGN_BY },
+  delivered: null,
 };
-const theirs: InboxEntry = { order: order({ title: "Not for you" }), claim: { kind: "someone-else", holderSignBy: SIGN_BY, youClaimed: false } };
+const theirs: InboxEntry = { order: order({ title: "Not for you" }), claim: { kind: "someone-else", holderSignBy: SIGN_BY, youClaimed: false }, delivered: null };
 const expired: InboxEntry = {
   order: order({ title: "Too late", envelope: { ...order().envelope, deadline: utc(new Date(2026, 8, 8, 17, 0, 0)) } }),
   claim: { kind: "open" },
+  delivered: null,
 };
 
 describe("InboxScreen", () => {

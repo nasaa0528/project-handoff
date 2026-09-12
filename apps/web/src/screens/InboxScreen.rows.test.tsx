@@ -7,6 +7,7 @@ import type { InboxEntry } from "../orders/order";
 const priced = (hbarTinybars: string, deadline: Date, title: string): InboxEntry => ({
   order: order({ title, envelope: { ...order().envelope, price_tinybars: hbarTinybars, deadline: utc(deadline) } }),
   claim: { kind: "open" },
+  delivered: null,
 });
 
 describe("inbox rows expand", () => {
@@ -44,7 +45,7 @@ describe("inbox rows expand", () => {
   });
 
   it("says whether a held order has been started, from the local draft", () => {
-    const mine: InboxEntry = { order: order({ title: "Mine" }), claim: { kind: "yours", claimedAtEpochSeconds: 0, signBy: SIGN_BY } };
+    const mine: InboxEntry = { order: order({ title: "Mine" }), claim: { kind: "yours", claimedAtEpochSeconds: 0, signBy: SIGN_BY }, delivered: null };
     const fresh = renderToStaticMarkup(<InboxScreen entries={[mine]} now={NOW} onOpen={() => {}} progress={() => "not-started"} />);
     expect(fresh).toContain("Not started");
     expect(fresh).toContain("Claimed · yours to review · sign by 18:12");
@@ -57,6 +58,7 @@ describe("inbox rows expand", () => {
     const lost: InboxEntry = {
       order: order({ title: "Lost this one" }),
       claim: { kind: "someone-else", holderSignBy: SIGN_BY, youClaimed: true },
+      delivered: null,
     };
     const html = renderToStaticMarkup(<InboxScreen entries={[open, lost]} now={NOW} onOpen={() => {}} />);
     expect(html).toContain("You claimed and lost");
@@ -74,6 +76,7 @@ describe("inbox rows expand", () => {
     const theirs: InboxEntry = {
       order: order({ title: "Never mine" }),
       claim: { kind: "someone-else", holderSignBy: SIGN_BY, youClaimed: false },
+      delivered: null,
     };
     const html = renderToStaticMarkup(<InboxScreen entries={[open, theirs]} now={NOW} onOpen={() => {}} />);
     expect(html).toContain("1 claimed by someone else");
