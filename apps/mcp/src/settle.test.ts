@@ -65,6 +65,9 @@ function deps(chain: ChainAdapter, overrides: Partial<SettleDeps> = {}): SettleD
     ordersTopicId: ORDERS,
     attestationsTopicId: ATTESTATIONS,
     escrowAccountId: MOCK_ESCROW_ACCOUNT_ID,
+    // The escrow has paid nothing unless a test says otherwise. Before the
+    // overrides, so a test can replace it.
+    findPayout: async () => null,
     ...overrides,
   };
 }
@@ -360,5 +363,116 @@ describe("the deadline is read with one parser", () => {
     await expect(
       settleOrder("ord_1", deps(chain, { nowEpochSeconds: past - 2 })),
     ).rejects.toMatchObject({ refusal: { retryable: true, state: "POSTED" } });
+  });
+});
+
+
+/**
+ * The refusal the incident of 2026-09-12 produced, and what answers it now.
+ *
+ * Order `ord_625a742e59174b5a9f4d6f1d7b42bd4a` was claimed, delivered 12.7 s
+ * into an 1800 s window, and paid nine seconds later. Half an hour after that a
+ * second account claimed the reopen, `resolveClaims` handed it the order, and a
+ * settle retry refused with "no attestation from that account is on the topic
+ * yet. The mirror node lags a few seconds behind consensus", `retryable: true`.
+ * Both halves were wrong: the money had already moved, and waiting could never
+ * change the answer.
+ *
+ * The tests below drive that refusal the short way — a holder with no
+ * attestation of their own reaches exactly the same gate — rather than
+ * rebuilding the incident's half-hour timeline, which the mock's real-time
+ * consensus timestamps cannot express: a second claim submitted milliseconds
+ * after the first lands inside its window and loses the race, which is the
+ * treaty working, not a reopen.
+ *
+ * That the holder drifts to a reopener at all is the separate `resolveClaims`
+ * question and is P4's — see the settle decision's open questions. What is
+ * fixed here is narrower and entirely this file's: a paid order is answered as
+ * paid before the holder is consulted at all.
+ */
+describe("an order that was already paid", () => {
+  const PAYOUT_TX = "0.0.10376667@1789207327.561294958";
+
+  const sighting = (payee: string | null) => ({
+    transactionId: PAYOUT_TX,
+    consensusTimestamp: "1789207332.509697570",
+    amountTinybars: PRICE,
+    payeeAccountId: payee,
+  });
+
+  /** Claimed, with nothing signed by the holder: the gate the incident hit. */
+  async function claimedNotSigned(): Promise<MockChainAdapter> {
+    const chain = new MockChainAdapter();
+    await chain.submitMessage(ORDERS, envelope("ord_1"));
+    await chain.publishClaim(ORDERS, EXPERT, claim("ord_1"));
+    return chain;
+  }
+
+  /** The control: without the payout lookup this is the incident's answer. */
+  it("used to refuse with a retryable answer that could never come true", async () => {
+    const chain = await claimedNotSigned();
+
+    await expect(settleOrder("ord_1", deps(chain))).rejects.toMatchObject({
+      refusal: { kind: "not-ready", state: "CLAIMED" },
+    });
+  });
+
+  it("reports the original payout instead, and composes no second one", async () => {
+    const chain = await claimedNotSigned();
+    const createSchedule = vi.spyOn(chain, "createSchedule");
+
+    const settlement = await settleOrder(
+      "ord_1",
+      deps(chain, { findPayout: async () => sighting(EXPERT) }),
+    );
+
+    expect(settlement.state).toBe("SETTLED");
+    expect(settlement.settledBefore).toBe(true);
+    // The transfer that actually happened, and the account it actually
+    // credited — not whoever the holder rule points at now.
+    expect(settlement.payoutTransactionId).toBe(PAYOUT_TX);
+    expect(settlement.payeeAccountId).toBe(EXPERT);
+    expect(settlement.amountTinybars).toBe(PRICE);
+    // Nothing was read out of this process's memory to answer it.
+    expect(settlement.alreadyRecorded).toBe(false);
+    // The irreversible half never ran.
+    expect(createSchedule).not.toHaveBeenCalled();
+  });
+
+  it("answers before the topics are read, so an unseen envelope cannot block it", async () => {
+    const chain = new MockChainAdapter();
+    const readMessages = vi.spyOn(chain, "readMessages");
+
+    const settlement = await settleOrder(
+      "ord_missing",
+      deps(chain, { findPayout: async () => sighting(EXPERT) }),
+    );
+
+    expect(settlement.settledBefore).toBe(true);
+    expect(readMessages).not.toHaveBeenCalled();
+  });
+
+  it("carries on when the memo is there but no single leg names the payee", async () => {
+    const chain = await delivered("ord_1");
+
+    // The memo says a payout happened; it does not say where it went. Naming a
+    // payee this call cannot see is worse than carrying on, and the adapter's
+    // own check refuses loudly if that transfer credited somebody else.
+    const settlement = await settleOrder(
+      "ord_1",
+      deps(chain, { findPayout: async () => sighting(null) }),
+    );
+
+    expect(settlement.settledBefore).toBe(false);
+    expect(settlement.payeeAccountId).toBe(EXPERT);
+  });
+
+  it("settles normally when the escrow has made no such payout", async () => {
+    const chain = await delivered("ord_1");
+
+    const settlement = await settleOrder("ord_1", deps(chain));
+
+    expect(settlement.settledBefore).toBe(false);
+    expect(settlement.payeeAccountId).toBe(EXPERT);
   });
 });
