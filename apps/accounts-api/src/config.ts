@@ -56,6 +56,19 @@ export interface AccountsApiConfig {
   readonly mirrorNodeUrl?: string;
   readonly allowUnverifiedSignIn: boolean;
   readonly trustProxy: boolean;
+  /**
+   * Whether this process may create Hedera accounts for people who register
+   * without one, and store their keys encrypted.
+   *
+   * Off unless a line in a file turns it on, because turning it on is the custody
+   * `docs/decisions/2026-09-12-platform-creates-and-stores-expert-key.md` granted
+   * as a narrow exception — not a default anyone should get by forgetting to set
+   * something. When it is off the service is given no provisioner at all, so the
+   * capability is absent rather than merely unused.
+   */
+  readonly provisionAccounts: boolean;
+  /** What each created account is funded with. Only read when provisioning is on. */
+  readonly newAccountBalanceHbar: string;
 }
 
 export function storeModeFromEnv(): StoreMode {
@@ -91,6 +104,14 @@ export function configFromEnv(): AccountsApiConfig {
   const mongoDatabase = optional("MONGODB_DB");
   const mirrorNodeUrl = optional("HEDERA_MIRROR_NODE_URL");
 
+  const provisionAccounts = optional("HANDOFF_ACCOUNTS_PROVISION") === "true";
+  const newAccountBalanceHbar = optional("HANDOFF_ACCOUNTS_NEW_BALANCE_HBAR") ?? "1";
+  if (provisionAccounts && !/^\d+(\.\d+)?$/.test(newAccountBalanceHbar)) {
+    throw new ConfigError(
+      `HANDOFF_ACCOUNTS_NEW_BALANCE_HBAR is "${newAccountBalanceHbar}", which is not an HBAR amount.`,
+    );
+  }
+
   return {
     port,
     storeMode,
@@ -117,5 +138,8 @@ export function configFromEnv(): AccountsApiConfig {
      * the header.
      */
     trustProxy: optional("HANDOFF_ACCOUNTS_TRUST_PROXY") === "true",
+
+    provisionAccounts,
+    newAccountBalanceHbar,
   };
 }
