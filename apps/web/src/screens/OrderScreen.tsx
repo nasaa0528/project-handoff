@@ -110,7 +110,7 @@ export function OrderScreen({
             </dd>
             <dt className="text-faint">Record</dt>
             <dd>
-              <HashscanLink kind="topic" id={order.topicId} label="View record" />
+              <HashscanLink kind="topic" id={order.ordersTopicId} label="View record" />
             </dd>
           </dl>
         </details>

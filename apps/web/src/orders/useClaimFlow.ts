@@ -43,7 +43,7 @@ export function useClaimFlow(source: OrderSource, expertAccountId: string): Clai
       const controller = new AbortController();
       watching.current = controller;
       confirmClaim({
-        topicId: order.topicId,
+        topicId: order.ordersTopicId,
         order: order.envelope,
         expertAccountId,
         submitted,

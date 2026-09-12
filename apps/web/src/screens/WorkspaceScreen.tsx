@@ -205,7 +205,7 @@ export function WorkspaceScreen({
                   Order <Copyable value={orderId} display={orderId.length > 16 ? `${orderId.slice(0, 12)}…` : orderId} className="text-[11px]" />
                 </span>
                 <span className="ml-auto">
-                  <HashscanLink kind="topic" id={order.topicId} label="View record" />
+                  <HashscanLink kind="topic" id={order.ordersTopicId} label="View record" />
                 </span>
               </div>
             </div>
@@ -370,8 +370,8 @@ export function WorkspaceScreen({
                         </SummaryRow>
                         <SummaryRow label="Record">
                           <span className="flex items-center justify-end gap-2">
-                            <Mono className="text-[11px]">{order.topicId}</Mono>
-                            <HashscanLink kind="topic" id={order.topicId} label="View" />
+                            <Mono className="text-[11px]">{order.ordersTopicId}</Mono>
+                            <HashscanLink kind="topic" id={order.ordersTopicId} label="View" />
                           </span>
                         </SummaryRow>
                       </details>

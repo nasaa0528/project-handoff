@@ -27,8 +27,10 @@ const envelope = ReviewOrder.parse({
 const order: OrderForSigning = {
   envelope,
   escrowAccountId: "MOCK-escrow-ord_demo",
-  topicId: "MOCK-topic-orders",
+  attestationsTopicId: "MOCK-topic-attestations",
 };
+
+const ORDERS_TOPIC = "MOCK-topic-orders";
 
 const NOTES =
   "The Q2 total does not foot: 1,240 minus 980 is 260, and footnote 2 dates the filing " +
@@ -69,9 +71,9 @@ describe("signAndPublish", () => {
     expect(signed.transactionId).toMatch(/^MOCK-tx-/);
     expect(signed.consensusTimestamp).toMatch(/^\d+\.\d{9}$/);
     expect(signed.sequenceNumber).toBe(1);
-    expect(signed.topicId).toBe(order.topicId);
+    expect(signed.topicId).toBe(order.attestationsTopicId);
 
-    const [message] = await h.chain.readMessages(order.topicId);
+    const [message] = await h.chain.readMessages(order.attestationsTopicId);
     expect(message?.contents).toBe(signed.body);
     expect(decodeAttestation(signed.body)).toEqual(signed.attestation);
     expect(signed.attestation.class).toBe("review");
@@ -102,7 +104,7 @@ describe("signAndPublish", () => {
       signAndPublish({ order, verdict: "approve", defects: tooMany, notes: NOTES }, h),
     ).rejects.toThrow();
     expect(h.log).toEqual([]);
-    expect(await h.chain.readMessages(order.topicId)).toEqual([]);
+    expect(await h.chain.readMessages(order.attestationsTopicId)).toEqual([]);
   });
 
   it("publishes nothing when the content store fails", async () => {
@@ -118,7 +120,7 @@ describe("signAndPublish", () => {
     await expect(
       signAndPublish({ order, verdict: "approve", defects: [], notes: NOTES }, { chain: h.chain, content: failing }),
     ).rejects.toThrow("store down");
-    expect(await h.chain.readMessages(order.topicId)).toEqual([]);
+    expect(await h.chain.readMessages(order.attestationsTopicId)).toEqual([]);
   });
 
   it("signs a reject exactly like an approve, because a reject is a delivered product", async () => {
@@ -126,8 +128,28 @@ describe("signAndPublish", () => {
       const h = harness();
       const signed = await signAndPublish({ order, verdict, defects: [], notes: NOTES }, h);
       expect(signed.attestation.verdict).toBe(verdict);
-      expect(await h.chain.readMessages(order.topicId)).toHaveLength(1);
+      expect(await h.chain.readMessages(order.attestationsTopicId)).toHaveLength(1);
       expect(h.log).toEqual(["store", "publish"]);
     }
+  });
+});
+
+describe("which topic the attestation lands on", () => {
+  /**
+   * The bug this replaces: the app carried one topic id, the sign path used it,
+   * and the verdict went to the orders topic while apps/mcp read the
+   * attestations topic. Both calls succeed, nothing throws, and the payout
+   * never fires. So assert the destination, not just that something published.
+   */
+  it("publishes to the attestations topic and never to the orders topic", async () => {
+    const h = harness();
+    const signed = await signAndPublish(
+      { order, verdict: "approve", defects: [], notes: NOTES },
+      h,
+    );
+
+    expect(signed.topicId).toBe("MOCK-topic-attestations");
+    expect(await h.chain.readMessages("MOCK-topic-attestations")).toHaveLength(1);
+    expect(await h.chain.readMessages(ORDERS_TOPIC)).toEqual([]);
   });
 });

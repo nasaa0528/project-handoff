@@ -23,6 +23,8 @@ export interface TestnetOrdersDeps {
   readonly chain: Pick<ExpertChain, "readMessages" | "submitMessage">;
   readonly content: ContentStore;
   readonly ordersTopicId: string;
+  /** Where the verdict goes. Never the orders topic. */
+  readonly attestationsTopicId: string;
   /** The shared escrow account. Shown; the payout locator reads about it. */
   readonly escrowAccountId: string;
   readonly expertAccountId: string;
@@ -94,7 +96,8 @@ export class TestnetOrderSource implements OrderSource {
       const order: ExpertOrder = {
         envelope,
         escrowAccountId: this.#deps.escrowAccountId,
-        topicId: this.#deps.ordersTopicId,
+        ordersTopicId: this.#deps.ordersTopicId,
+        attestationsTopicId: this.#deps.attestationsTopicId,
         title: known ? titleFromAsk(ask, envelope.order_id) : `Order ${envelope.order_id}`,
         ask,
         documentWords: null,

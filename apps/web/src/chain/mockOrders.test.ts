@@ -14,6 +14,7 @@ async function seed() {
   const source = await MockOrderSource.seed(chain, content, {
     expertAccountId: EXPERT,
     ordersTopicId: "MOCK-topic-orders",
+    attestationsTopicId: "MOCK-topic-attestations",
     requesterAccountId: "MOCK-requester",
     priceHbar: "100",
     mirrorLagMs: 6_000,
@@ -43,7 +44,7 @@ describe("MockOrderSource", () => {
     const submitted = await source.claim(first.order);
     const confirmation = await confirmClaim(
       {
-        topicId: first.order.topicId,
+        topicId: first.order.ordersTopicId,
         order: first.order.envelope,
         expertAccountId: EXPERT,
         submitted,
@@ -64,7 +65,7 @@ describe("MockOrderSource", () => {
     const submitted = await source.claim(second.order);
     const confirmation = await confirmClaim(
       {
-        topicId: second.order.topicId,
+        topicId: second.order.ordersTopicId,
         order: second.order.envelope,
         expertAccountId: EXPERT,
         submitted,

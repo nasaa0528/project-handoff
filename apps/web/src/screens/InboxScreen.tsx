@@ -417,7 +417,7 @@ function Row({
               </dd>
               <dt className="text-faint">Record</dt>
               <dd className="m-0">
-                <HashscanLink kind="topic" id={order.topicId} label="View record" />
+                <HashscanLink kind="topic" id={order.ordersTopicId} label="View record" />
               </dd>
             </dl>
           </div>

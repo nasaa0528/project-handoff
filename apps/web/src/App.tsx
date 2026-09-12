@@ -83,6 +83,7 @@ async function boot(config: WebChainConfig, connection: ExpertConnection): Promi
       chain: chain.chain,
       content: chain.content,
       ordersTopicId: config.ordersTopicId,
+      attestationsTopicId: config.attestationsTopicId,
       escrowAccountId: config.escrowAccountId,
       expertAccountId: chain.expertAccountId,
     });
@@ -126,6 +127,7 @@ async function boot(config: WebChainConfig, connection: ExpertConnection): Promi
   const source = await MockOrderSource.seed(chain.mock, chain.content, {
     expertAccountId: chain.expertAccountId,
     ordersTopicId: config.ordersTopicId,
+    attestationsTopicId: config.attestationsTopicId,
     requesterAccountId: config.mock.requesterAccountId,
     priceHbar: config.mock.priceHbar,
     mirrorLagMs: MIRROR_EXPECTED_LAG_MS,
