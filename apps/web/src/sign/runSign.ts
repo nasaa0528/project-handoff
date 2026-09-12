@@ -25,9 +25,12 @@ export interface SignRequest {
 export interface SignRunDeps {
   readonly chain: WebChain;
   /**
-   * Mock mode only: the platform's side, standing in for the verifier that
-   * reads the attestation and co-signs the payout. On testnet this is absent.
-   * The expert app never triggers a payout; it only reads whether one landed.
+   * The platform's side, after the attestation stands. On the mock it is the
+   * stand-in platform releasing payment; on testnet it asks the resource
+   * server to settle (`settle.ts`), which pays only what the public topics
+   * say. Either way the app never signs a payout and never infers one from
+   * having asked: Paid is a mirror read. A throw here is a platform issue on
+   * screen; the attestation stands regardless.
    */
   readonly afterPublish?: (order: OrderForSigning, signed: SignedAttestation) => Promise<void>;
 }

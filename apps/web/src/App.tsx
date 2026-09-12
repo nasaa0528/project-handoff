@@ -28,6 +28,7 @@ import { OrderScreen } from "./screens/OrderScreen";
 import { WorkspaceScreen } from "./screens/WorkspaceScreen";
 import { describeConnectError, type ExpertConnection } from "./session/connect";
 import { mirrorPayoutLocator } from "./sign/payoutLocator";
+import { settleOrder } from "./sign/settle";
 import { describeError } from "./sign/runSign";
 import { MIRROR_EXPECTED_LAG_MS } from "./sign/settlement";
 import { useSignFlow, type SignFlowDeps } from "./sign/useSignFlow";
@@ -68,9 +69,16 @@ async function boot(config: WebChainConfig, connection: ExpertConnection): Promi
   if (config.mode === "testnet" && chain.mode === "testnet") {
     // The real thing: orders and claims off the topic through the expert's
     // own chain, the ask and the document from the content store, and the
-    // payout found by a mirror read of the expert's transfers since the
-    // verdict. Nobody stands in for anybody. Credential pills wait for the
-    // registry (NAS-27); until then there is nothing honest to show there.
+    // payout asked for from the platform after the verdict stands, then read
+    // on the mirror like everything else. Nobody stands in for anybody.
+    // Credential pills wait for the registry (NAS-27); until then there is
+    // nothing honest to show there.
+    //
+    // The settle answer names the payout transaction, and the locator hands
+    // that to the watcher rather than making it search the expert's transfers
+    // for it; the mirror search stays as the fallback for a settle that timed
+    // out and landed later. Per connection, like everything in `Booted`.
+    const settledPayouts = new Map<string, string>();
     const source = new TestnetOrderSource({
       chain: chain.chain,
       content: chain.content,
@@ -86,14 +94,24 @@ async function boot(config: WebChainConfig, connection: ExpertConnection): Promi
       deps: {
         chain,
         reader: chain.chain,
-        locatePayout: (o, signed) =>
-          mirrorPayoutLocator({
+        // Ask the platform to release the escrow. Anything this throws is a
+        // platform issue on screen; the attestation stands regardless.
+        afterPublish: async (o) => {
+          const settled = await settleOrder({ apiUrl: config.apiUrl, orderId: o.envelope.order_id });
+          settledPayouts.set(o.envelope.order_id, settled.payoutTransactionId);
+        },
+        locatePayout: (o, signed) => {
+          const mirror = mirrorPayoutLocator({
             mirrorNodeUrl: config.mirrorNodeUrl,
             expertAccountId: chain.expertAccountId,
             escrowAccountId: config.escrowAccountId,
             amountTinybars: o.envelope.price_tinybars,
             notBefore: signed.consensusTimestamp,
-          }),
+          });
+          return {
+            locate: async () => settledPayouts.get(o.envelope.order_id) ?? (await mirror.locate()),
+          };
+        },
       },
     };
   }

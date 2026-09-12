@@ -199,9 +199,16 @@ sits there.
 - Orders come off the topic through `TestnetOrderSource` (`src/chain/testnetOrders.ts`)
   and claims are decided by the treaty's `resolveClaims`; the app has no winner rule of
   its own. A claim is `submitMessage` on the expert's chain, so the payer is the expert.
-- The payout is found, never told: `mirrorPayoutLocator` reads the expert's transfers
-  since the verdict's consensus timestamp and matches the one that moves the order value
-  from the escrow. Read directly from the mirror node, which is allowed; Hashscan is not.
+- **The payout is asked for, then read.** After the attestation stands, `afterPublish`
+  calls `POST {api}/orders/{id}/settle` (`src/sign/settle.ts`): the order id and nothing
+  else, retried while the service says the mirror has not caught up, for the same minute
+  the settlement watcher allows. The answer names the payout transaction and the locator
+  hands it to the watcher, which still reads it on the mirror before saying Paid — the id
+  is a claim until a mirror node shows it. A violation or a non-retryable refusal lands
+  on the platform-issue line; the sign button never comes back. `mirrorPayoutLocator`
+  stays as the fallback, reading the expert's transfers since the verdict for the one that
+  moves the order value from the escrow, for a settle that timed out and landed later.
+  Decision: `../../docs/decisions/2026-09-12-settle-is-an-explicit-endpoint-and-idempotency-lives-on-the-mirror.md`.
 - Content is `HttpContentStore`: `GET {VITE_CONTENT_URL}/{sha256}` for the ask and the
   document, `PUT` for the notes, every read checked against its hash. The Supabase
   service key never reaches this app, so something server-side answers that URL: it is
