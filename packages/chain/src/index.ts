@@ -12,3 +12,4 @@ export * from "./expert-chain.js";
 export * from "./x402-signer.js";
 export * from "./pending-payout.js";
 export * from "./direct-payout.js";
+export * from "./create-account.js";
