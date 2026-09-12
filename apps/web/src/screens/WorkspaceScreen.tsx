@@ -19,6 +19,7 @@ import { Stepper, type StepperStep } from "../components/Stepper";
 import { VERDICT_WORDS, VerdictPicker } from "../components/VerdictPicker";
 import { clockWords, isPast } from "../lib/clock";
 import { EMPTY_DRAFT, type Draft, type DraftStore } from "../lib/draft";
+import type { DeliveredState } from "../orders/delivery";
 import { countWords, type ExpertOrder } from "../orders/order";
 import { composeNotes, issueCode, issueCodes } from "../sign/defects";
 import { hashNotes } from "../sign/notes";
@@ -37,6 +38,59 @@ const STEPS: readonly StepperStep[] = [
 
 function SectionLabel({ children }: { children: string }) {
   return <p className="text-[11px] font-semibold tracking-[0.06em] text-faint uppercase">{children}</p>;
+}
+
+/**
+ * The verdict this expert already published, read back off the topic.
+ *
+ * Deliberately not `PublishedStatus`. That panel is for the moment of signing
+ * and needs the transaction id and a live settlement watch; a mirror read of the
+ * topic has neither, and inventing them would put a link on screen that 404s.
+ * What is certain is what it says: the verdict, where it is, and that it stands.
+ */
+function PublishedEarlier({
+  mode,
+  order,
+  delivered,
+  onBackToInbox,
+}: {
+  mode: ChainMode;
+  order: ExpertOrder;
+  delivered: DeliveredState;
+  onBackToInbox: () => void;
+}) {
+  return (
+    <Section title="Your verdict">
+      <div className="grid gap-3 rounded-lg border border-paid/20 bg-paid/5 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <ShieldCheck className="size-4 text-paid" aria-hidden />
+          <span className="text-sm font-medium text-paid">{VERDICT_WORDS[delivered.verdict]}</span>
+          <Badge variant="outline" className="border-paid/20 bg-paid/5 text-paid">
+            Published
+          </Badge>
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          You signed this order and the verdict is on the topic under your account. It cannot be
+          changed, and signing again would publish a second message rather than replace this one.
+        </p>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+          <dt className="text-faint">Record</dt>
+          <dd className="m-0 flex flex-wrap items-center gap-2">
+            <Mono className="text-[11px]">{`${order.attestationsTopicId} · #${delivered.sequenceNumber}`}</Mono>
+            <HashscanLink kind="topic" id={order.attestationsTopicId} label="View" />
+          </dd>
+          <dt className="text-faint">Signed by</dt>
+          <dd className="m-0">
+            <Mono className="text-[11px]">{delivered.signedBy}</Mono>
+          </dd>
+        </dl>
+        {mode === "mock" && <p className="text-[11px] text-faint">Mock mode: nothing here is on a real network.</p>}
+      </div>
+      <button type="button" className="w-fit text-xs text-faint underline-offset-4 hover:underline" onClick={onBackToInbox}>
+        Back to the inbox
+      </button>
+    </Section>
+  );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -78,6 +132,7 @@ export function WorkspaceScreen({
   now,
   drafts,
   onBackToInbox,
+  delivered = null,
   initialIssueDraft = "",
 }: {
   mode: ChainMode;
@@ -91,6 +146,15 @@ export function WorkspaceScreen({
   now: Date;
   drafts: DraftStore;
   onBackToInbox: () => void;
+  /**
+   * The verdict already on the attestations topic, when there is one.
+   *
+   * A fresh sign is `flow.status`; this is the same fact read back off the
+   * network on a later visit, when the component has no memory of publishing it.
+   * Without it the screen offered the form again, and the form was used: two
+   * attestations for one order on testnet, 2026-09-12, 107 seconds apart.
+   */
+  delivered?: DeliveredState | null;
   /** For tests: an issue typed but not yet added. */
   initialIssueDraft?: string;
 }) {
@@ -104,7 +168,12 @@ export function WorkspaceScreen({
   const { notes, issues, verdict } = draft;
   const update = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
-  const signed = flow.status.kind === "signed";
+  // Published on an earlier visit: the topic says so and this component does
+  // not. Kept separate from a sign that happened here, because far less is
+  // known about it — a mirror read carries no transaction id — and nothing may
+  // invent one.
+  const publishedBefore = flow.status.kind !== "signed" && delivered?.yours === true;
+  const signed = flow.status.kind === "signed" || publishedBefore;
   const locked = flow.status.kind !== "idle" && flow.status.kind !== "error";
 
   /** What is stored, hashed and delivered: the writing, then the issues under their codes. */
@@ -270,6 +339,8 @@ export function WorkspaceScreen({
                   </button>
                 )}
               </>
+            ) : publishedBefore && delivered !== null ? (
+              <PublishedEarlier mode={mode} order={order} delivered={delivered} onBackToInbox={onBackToInbox} />
             ) : (
               !claimExpired && (
                 <>
