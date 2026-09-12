@@ -17,6 +17,7 @@ import { executeDirectPayout } from "./direct-payout.js";
 import { buildFundLock, submitFundLock } from "./fund-lock.js";
 import { submitTopicMessage, submitTopicMessageAsPayer } from "./hcs.js";
 import { fetchMirrorTopicMessages, fetchMirrorTransaction, toMirrorTransactionId } from "./mirror.js";
+import { findPayout } from "./payout-lookup.js";
 import { PendingPayoutStore } from "./pending-payout.js";
 
 /**
@@ -73,6 +74,17 @@ export interface HederaChainAdapterConfig {
 export class HederaChainAdapter implements ChainAdapter {
   readonly network = "testnet" as const;
   readonly #pendingPayouts = new PendingPayoutStore();
+  /**
+   * Payouts currently in flight, by schedule id.
+   *
+   * The mirror check below cannot see a transfer that has not been submitted
+   * yet, so two overlapping calls for the same order — an expert clicking sign
+   * while the demo script retries, an HTTP client that timed out and tried
+   * again — would both read "not paid" and both pay. `markExecuted` runs far
+   * too late to help. So the second caller joins the first one's promise
+   * instead of starting its own.
+   */
+  readonly #inFlight = new Map<string, Promise<SignScheduleResult>>();
 
   constructor(private readonly config: HederaChainAdapterConfig) {}
 
@@ -187,10 +199,34 @@ export class HederaChainAdapter implements ChainAdapter {
    * The interface takes only a scheduleId — it deliberately hides that early-execute
    * needs two signatures. Both platform keys co-sign the SAME TransferTransaction in
    * one call (direct-payout.ts), not two separate ScheduleSign calls over time.
-   * Idempotent: signing an already-executed payout returns success without
-   * re-submitting anything.
+   *
+   * Idempotent on two levels, and it needs both. In-process, an already-executed
+   * record returns its transaction id. Across a restart — where the in-process
+   * record is gone — the mirror node is asked whether this order's payout memo
+   * already appears among the escrow's debits. Without the second level, every
+   * crash is a double payment waiting for a retry.
    */
   async signSchedule(scheduleId: string): Promise<SignScheduleResult> {
+    // Before anything else, including the record lookup: a caller that arrives
+    // while a payout is in flight gets that payout's answer, not a second one.
+    const inFlight = this.#inFlight.get(scheduleId);
+    if (inFlight !== undefined) {
+      return inFlight;
+    }
+
+    const attempt = this.#signSchedule(scheduleId);
+    this.#inFlight.set(scheduleId, attempt);
+    try {
+      return await attempt;
+    } finally {
+      // Cleared on failure too. A payout that threw may or may not have
+      // landed, and the next caller has to be able to ask the mirror node
+      // rather than being handed a rejection forever.
+      this.#inFlight.delete(scheduleId);
+    }
+  }
+
+  async #signSchedule(scheduleId: string): Promise<SignScheduleResult> {
     const record = this.#pendingPayouts.get(scheduleId);
 
     if (record.deleted) {
@@ -201,7 +237,48 @@ export class HederaChainAdapter implements ChainAdapter {
       return { transactionId: record.executedTransactionId ?? record.createdTransactionId, executed: true };
     }
 
+    // The in-memory record above is this process's memory and nothing more. It
+    // is empty after a restart, and a caller retrying a settle it never got an
+    // answer to would arrive here with a fresh record for an order the expert
+    // has already been paid for. So the authoritative "already paid?" is asked
+    // of the mirror node, which remembers what this process does not.
+    //
+    // Ordering matters: the network is consulted BEFORE any signature is
+    // composed, so the expensive, irreversible half never runs on an order
+    // that is already settled.
+    const alreadyPaid = await findPayout(this.config.mirrorNodeUrl, {
+      escrowAccountId: record.escrowAccountId,
+      orderId: record.orderId,
+    });
+    if (alreadyPaid !== null) {
+      // The memo binds that transfer to this order, but it does not promise it
+      // went where this record says. A sighting that credited somebody else is
+      // not "already paid" — it is a fact nobody here can explain, and the
+      // wrong answer to it is to report success and move on.
+      //
+      // Only the payee is compared. Not the amount: a payout whose payee also
+      // paid the transaction fee has that fee netted out of their credit leg,
+      // so the amounts legitimately differ and comparing them would refuse a
+      // correct payout. Measured on testnet 2026-09-12.
+      if (
+        alreadyPaid.payeeAccountId !== null &&
+        alreadyPaid.payeeAccountId !== record.payeeAccountId
+      ) {
+        throw new Error(
+          `order ${record.orderId} was already paid by ${alreadyPaid.transactionId}, but that ` +
+            `transfer credited ${alreadyPaid.payeeAccountId} and this payout is for ` +
+            `${record.payeeAccountId}. Refusing to report it as settled; read the escrow's ` +
+            `transfers on the mirror node before doing anything else.`,
+        );
+      }
+      // Not an error. "Payout is an idempotent retry" — a second call returns
+      // the first call's transaction id and moves nothing.
+      this.#pendingPayouts.markExecuted(scheduleId, alreadyPaid.transactionId);
+      return { transactionId: alreadyPaid.transactionId, executed: true };
+    }
+
     const result = await executeDirectPayout(this.config.client, {
+      orderId: record.orderId,
       escrowAccountId: AccountId.fromString(record.escrowAccountId),
       payeeAccountId: AccountId.fromString(record.payeeAccountId),
       amountTinybars: record.amountTinybars,

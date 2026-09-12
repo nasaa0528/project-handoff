@@ -275,15 +275,62 @@ co-signed transfer instead.
 Two consequences that keep the old shape's guarantees:
 
 - **Idempotency** was `IDENTICAL_SCHEDULE_ALREADY_CREATED`, given free by the network.
-  It is now `derivePendingPayoutId`, a deterministic hash of the payout's parameters —
-  identical params resolve to the identical id, and signing an already-executed payout
-  returns success without re-submitting. Never double-pay still holds.
+  It is now two levels, and it needs both. In-process, `derivePendingPayoutId` is a
+  deterministic hash of the payout's parameters, so identical params resolve to the
+  identical id and signing an already-executed payout returns success without
+  re-submitting. Across a restart, where that map is empty, the **mirror node** is the
+  memory: every payout carries the memo `handoff-payout:<order_id>`, and `signSchedule`
+  asks whether that memo already appears among the escrow's debits before it composes a
+  signature. Without the second level, "never double-pay" holds only until the first
+  crash. See
+  `decisions/2026-09-12-settle-is-an-explicit-endpoint-and-idempotency-lives-on-the-mirror.md`.
 - **The post-to-claim window** is still protected by the threshold key alone, still
   trusted-platform, still admitted out loud.
 
 The demo narration says **"committed at claim"**, never "committed at post". What
 happens at DELIVERED is a co-signed transfer, not a `ScheduleSign` — say "the platform
 co-signs and the money moves", not "the schedule fires".
+
+### Who asks for the payout
+
+`POST /orders/{id}/settle` on the resource server, an explicit call rather than a
+watcher. A background re-scan of the attestations topic would, after any restart, meet
+already-paid orders with an empty payout map; the mirror read makes a *retry* safe, which
+is a reason to let a caller retry rather than to poll on their behalf.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant X as Expert app / settle script
+    participant M as apps/mcp
+    participant MN as Mirror node
+    participant H as Hedera
+    X->>M: POST /orders/{id}/settle
+    M->>MN: read orders + attestations topics
+    MN-->>M: envelope, claims, attestations
+    Note over M: holder = resolveClaims<br/>attestation must be the HOLDER's<br/>class, artifact hash, cert tag must match<br/>verdict is never read
+    M->>MN: has handoff-payout:{id} already debited the escrow?
+    alt already paid
+        MN-->>M: the original payout transaction
+        M-->>X: 200, that same transaction id
+    else not yet
+        M->>H: verifier + schedule-admin co-sign ONE transfer
+        H-->>M: payout transaction id
+        M-->>X: 200 SETTLED
+    end
+```
+
+The refusals are as load-bearing as the payment. A caller gets `409` with `retryable:
+true` while the order is not yet delivered — the mirror node lags about six seconds
+behind consensus, so an expert settling the instant they publish will see it — and
+`409` with `retryable: false` on a mechanical schema violation, which never becomes
+payable. A chain failure is `502` with the detail intact, because that message may carry
+the transaction id of a payout whose outcome is unknown.
+
+An attestation from an account that never held the claim is **noise, not a violation**:
+it does not pay, and it does not shadow the holder's real one either. The attestations
+topic has no submit key, so otherwise anyone could freeze any expert's payment for the
+price of one HCS message.
 
 Verified end to end on real testnet against the provisioned escrow
 (`packages/chain/scripts/live-happy-path.ts`): real fund lock, real co-signed payout,

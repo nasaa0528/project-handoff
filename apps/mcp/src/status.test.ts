@@ -188,7 +188,11 @@ describe("readOrderStatus", () => {
     const chain = new MockChainAdapter();
     await chain.submitMessage(ORDERS, envelope("ord_1"));
     const claimed = await chain.publishClaim(ORDERS, "0.0.expert", claim("ord_1"));
-    await chain.submitMessage(ATTESTATIONS, attestation("ord_1", "approve"));
+    // From the claimant's own account, which is what an attestation is: the
+    // expert pays to submit it. A message from anybody else no longer keeps a
+    // claim alive, so a fixture that used the default payer was testing a
+    // stranger's message rather than the expert's.
+    await chain.publishClaim(ATTESTATIONS, "0.0.expert", attestation("ord_1", "approve"));
 
     const afterExpiry =
       Number(claimed.consensusTimestamp.split(".")[0]) + CLAIM_TIMEOUT_SECONDS + 1;

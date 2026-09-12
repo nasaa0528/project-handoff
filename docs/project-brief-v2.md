@@ -342,12 +342,20 @@ expert web app itself; custodial key management is a weeks-scale project.
   escrow `0.0.10422187` by `100000000`. The operator `0.0.10376667` appears nowhere in
   that transfer list; across the whole order it spent `0.0059` HBAR, the cost of
   submitting the HCS envelope. Details in `docs/research/x402-first-paid-request.md`.
-- **Escrowed funds have no return path.** `TIMEOUT` is a label in the lifecycle state
+- **Escrowed funds have no return path.** The escrow now pays *out* — `POST
+  /orders/{id}/settle` releases it to the expert, verified on testnet 2026-09-12 — but
+  only ever to the expert. There is no transfer back to the requester anywhere in the
+  codebase. `TIMEOUT`, `CLAIM_TIMEOUT` and `VIOLATION` are labels in the lifecycle state
   machine and nothing else: no process watches order deadlines, `ORDER_DEADLINE_EXPIRE`
-  is fired by nothing outside its own unit test, and `packages/chain/src/escrow.ts` has
-  a transfer in and none out. So an order nobody claims holds its funds indefinitely.
-  Under the requester-signed lock those are the requester's funds, which changes who
-  the gap costs without changing what it is.
+  and `SCHEMA_VIOLATION` are fired by nothing outside their own unit tests, and
+  `deleteSchedule` clears a local record rather than moving money. So an order nobody
+  claims, and an order refused for a schema violation, both hold their funds
+  indefinitely. Under the requester-signed lock those are the requester's funds, which
+  changes who the gap costs without changing what it is. **Measured 2026-09-12:** nine
+  orders on the shared escrow hold 18 testnet HBAR this way, seven of them past their
+  deadline and so no longer claimable. (The account is in `docs/links.md`; this document
+  is the one that goes on camera, and a figure carries here where an identifier does
+  not.)
 - **Execution class is schema + architecture**, demoed as roadmap; its proofs need an
   oracle story presented honestly as a trusted-verifier stub.
 - **Content availability is centralized** (Supabase). Signed URLs are access control —

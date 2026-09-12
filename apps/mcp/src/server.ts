@@ -38,6 +38,7 @@ import {
 } from "./x402/gate.js";
 import type { Facilitator } from "./x402/facilitator.js";
 import type { CertTagOption } from "./config.js";
+import { SettleError, settleOrder } from "./settle.js";
 import { readOrderStatus } from "./status.js";
 import { unknownTagReply } from "./replies.js";
 
@@ -74,6 +75,8 @@ export interface ServerDeps {
   readonly content: ContentStore;
   readonly ordersTopicId: string;
   readonly attestationsTopicId: string;
+  /** The one shared escrow. Needed to settle; never invented by this process. */
+  readonly escrowAccountId: string;
   readonly certTags: readonly CertTagOption[];
   /** Injectable so tests are deterministic. Minted at the 402. */
   readonly newOrderId?: () => string;
@@ -294,6 +297,60 @@ async function route(request: HttpRequest, deps: ServerDeps): Promise<HttpRespon
     }
 
     return { status: 405, headers: { ...json, ...cors, Allow: "GET, PUT, OPTIONS" }, body: { error: "use GET or PUT" } };
+  }
+
+  // Releasing the escrow. Ungated, and deliberately so: the x402 gate covers
+  // order posting only (decision 2026-09-05), and this call charges nobody —
+  // it moves money the requester already locked, to the expert who already
+  // signed, on facts that are already public. A caller cannot make it pay
+  // anything other than what the topics say, so there is nothing to sell here.
+  const orderSettle = /^\/orders\/([^/]+)\/settle$/.exec(request.path);
+  if (orderSettle !== null) {
+    if (request.method !== "POST") {
+      return { status: 405, headers: { ...json, Allow: "POST" }, body: { error: "use POST" } };
+    }
+    let orderId: string;
+    try {
+      orderId = decodeURIComponent(orderSettle[1] ?? "");
+    } catch {
+      return { status: 400, headers: json, body: { error: "that is not a usable order id" } };
+    }
+
+    try {
+      const settlement = await settleOrder(orderId, {
+        chain: deps.chain,
+        ordersTopicId: deps.ordersTopicId,
+        attestationsTopicId: deps.attestationsTopicId,
+        escrowAccountId: deps.escrowAccountId,
+      });
+      return { status: 200, headers: json, body: settlement };
+    } catch (error) {
+      if (error instanceof SettleError) {
+        // 409, not 400. The request was fine; the order is not in a state that
+        // pays yet. `retryable` is the half a caller acts on: a violation
+        // never becomes payable and a poller must stop.
+        return {
+          status: 409,
+          headers: json,
+          body: {
+            error: error.refusal.kind === "violation" ? "schema violation" : "not ready to settle",
+            message: error.refusal.message,
+            // A not-ready that cannot change — an order past its deadline
+            // with nobody holding it — says so, or a poller waits forever.
+            retryable: error.refusal.kind === "not-ready" && error.refusal.retryable !== false,
+            ...(error.refusal.kind === "not-ready" ? { state: error.refusal.state } : {}),
+          },
+        };
+      }
+      // The chain or the mirror node failed. Never flatten this into "could
+      // not settle": the message may carry the transaction id of a payout
+      // whose outcome is unknown, and that is the one thing the caller needs.
+      return {
+        status: 502,
+        headers: json,
+        body: { error: "the payout did not complete", detail: (error as Error).message },
+      };
+    }
   }
 
   // Reads are ungated by decision. Everything returned here is already on a

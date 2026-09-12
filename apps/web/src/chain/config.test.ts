@@ -8,6 +8,7 @@ describe("configFromEnv", () => {
     expect(configFromEnv({})).toEqual({
       mode: "mock",
       expertAccountIdPrefill: null,
+      accountsApiUrl: null,
       ordersTopicId: "MOCK-topic-orders",
       mock: { requesterAccountId: "MOCK-requester", priceHbar: "100" },
     });
@@ -103,6 +104,7 @@ describe("configFromEnv", () => {
     expect(configFromEnv({ ...testnet, VITE_MOCK_PRICE_HBAR: "1" })).toEqual({
       mode: "testnet",
       expertAccountIdPrefill: expert,
+      accountsApiUrl: null,
       ordersTopicId: "0.0.4242",
       mirrorNodeUrl: "https://testnet.mirrornode.hedera.com/api/v1",
       contentUrl: "https://content.example/store",
@@ -117,6 +119,13 @@ describe("configFromEnv", () => {
     expect(() => configFromEnv({ ...testnet, VITE_HEDERA_MIRROR_NODE_URL: "https://mainnet-public.mirrornode.hedera.com/api/v1" })).toThrow(/mainnet/);
     expect(() => configFromEnv({ ...testnet, VITE_CONTENT_URL: "http://content.example" })).toThrow(/https/);
     expect(() => configFromEnv({ ...testnet, VITE_CONTENT_URL: "not a url" })).toThrow(/not a URL/);
+  });
+
+  it("takes an accounts API only when named, on either chain, and refuses one that mentions mainnet", () => {
+    expect(configFromEnv({}).accountsApiUrl).toBeNull();
+    expect(configFromEnv({ VITE_ACCOUNTS_API_URL: "http://localhost:8788/" }).accountsApiUrl).toBe("http://localhost:8788");
+    expect(configFromEnv({ ...testnet, VITE_ACCOUNTS_API_URL: "https://accounts.example" }).accountsApiUrl).toBe("https://accounts.example");
+    expect(() => configFromEnv({ VITE_ACCOUNTS_API_URL: "https://mainnet.example" })).toThrow(/mainnet/);
   });
 
   it("allows plain http for a content server on localhost, for development", () => {

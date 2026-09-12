@@ -70,3 +70,5 @@ Newest last.
 ### 2026-09-12
 
 - [handoff_status reports CLAIMED, read off the orders topic with the treaty's resolveClaims](2026-09-12-handoff-status-reports-claimed.md) — retires the design system's "must not invent the middle state" note; **adds a state to `OrderStatus`**
+- [Platform creates and stores the expert's key, encrypted with the password](2026-09-12-platform-creates-and-stores-expert-key.md) — scope exception by P4, overrides the custody clause in Sep 8 and Sep 10 decisions; **demo-scoped, expires after the event**
+- [Settle is an explicit endpoint, not a watcher, and never-double-pay lives on the mirror node](2026-09-12-settle-is-an-explicit-endpoint-and-idempotency-lives-on-the-mirror.md) — closes the payer-equals-claimant gap the status decision left open; **the lifecycle reaches SETTLED**

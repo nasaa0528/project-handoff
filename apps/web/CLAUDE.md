@@ -61,6 +61,46 @@ nothing can satisfy (P2's lane, or Jack's nginx; the server-side change is in
 `apps/mcp/src/server.ts` and waits on a redeploy); and `X402Signer` lives server-side by
 decision and uses Node's `Buffer`, so it does not run in a browser build (P1's lane).
 
+## Email sign-in, as built (2026-09-12)
+
+`apps/accounts-api` exists (`docs/decisions/2026-09-10-registration-keyed-on-the-hedera-account.md`)
+and this app consumes it through `@handoff/accounts-client`, never `@handoff/accounts`.
+Configured by `VITE_ACCOUNTS_API_URL`; **absent, the connect screen offers the key path
+only** and nothing below renders. What a session is and is not:
+
+- **A session is who is at the keyboard. It is not a key.** Signing a verdict still
+  needs the key pasted into `SecretKey`, once, on the **key step** — the connect card
+  with the account locked and only the key field live. On the mock there is no key, so
+  an email session boots straight to the inbox.
+- **The register form does not ask for the Hedera account.** Since
+  `docs/decisions/2026-09-12-platform-creates-and-stores-expert-key.md` the account is
+  the service's to create, so the field is hidden and the flow takes whatever account
+  the service's answer names. Until the service can create one it refuses with
+  `field: hederaAccountId`; the form then comes back with the field revealed and a plain
+  sentence, and a typed id is checked on the testnet mirror as a first setup step. When
+  the service creates accounts that branch never fires and nothing here changes.
+- **The token lives in App state, in memory only.** Never `localStorage`; a reload is a
+  sign-in, like the key. Disconnect calls `signOut` best-effort. The password lives in
+  `AuthFlow`'s state for the length of the flow so the person is signed in the moment
+  the mailbox is confirmed, and dies with the component.
+- **The credential card is static.** Domain and license number are not stored, not sent,
+  and the caption says so: certification is an allowlist row set by the platform. The
+  card never says "verified". The setup card lists real steps only — a mirror lookup,
+  the register call, the code send — each lit when its call returns; nothing waits on a
+  timer to look busy, and nothing says "secure signing" was set up, because nothing was.
+- **Errors branch on `AccountsApiError.code`, never on the message**
+  (`src/session/accounts.ts`). `email_not_verified` is a route to the code screen, not
+  an error; `invalid_credentials` never says which of password or account was wrong.
+- **No `<form>` anywhere in the flow**, for the same reason as the key field: a
+  submitted form with a password asks the browser to save it, and that prompt must never
+  appear on camera.
+- **The three "Welcome" panes are an onboarding carousel**, which `docs/design-system.md`
+  lists under "do not just add". Built at the seat owner's request on 2026-09-12, as its
+  own commit so P4 can drop it cleanly; every line on it is something the build does.
+
+Screens: `src/screens/auth/AuthCards.tsx` (every state a prop), `AuthFlow.tsx` (the
+calls), and the email form and locked step on `ConnectScreen.tsx`.
+
 ## Who signs, and how the key gets here
 
 - The account and, on testnet, the private key come from the **connect screen**, not

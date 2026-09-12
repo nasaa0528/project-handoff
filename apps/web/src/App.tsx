@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccountsClient } from "@handoff/accounts-client";
+import { parseAccountId } from "./session/accountId";
 import { browserAccount } from "./session/remembered";
 import { createWebChain, type WebChain } from "./chain/adapter";
 import { configFromEnv, DEFAULT_MIRROR_NODE_URL, type WebChainConfig } from "./chain/config";
@@ -17,7 +19,9 @@ import { useClaimFlow } from "./orders/useClaimFlow";
 import { draftProblems, emptyDraft, requestQuote, type QuoteOutcome, type RequestDraft } from "./requests/create";
 import { useMyRequests, type MyRequestsWiring } from "./requests/useMyRequests";
 import { useRoute, type Route } from "./router";
+import { AuthFlow, type AuthStart } from "./screens/auth/AuthFlow";
 import { ConnectScreen, type ConnectOutcome } from "./screens/ConnectScreen";
+import { describeAccountsError, type AccountsSession } from "./session/accounts";
 import { InboxScreen } from "./screens/InboxScreen";
 import { MyRequestsScreen } from "./screens/MyRequestsScreen";
 import { OrderScreen } from "./screens/OrderScreen";
@@ -50,7 +54,13 @@ interface Booted {
  * connect on disconnect. Drafts persist in the browser; the connection does
  * not, so a reload is also a disconnect.
  */
-type AppState = { kind: "connect"; notice: string | null } | { kind: "ready"; booted: Booted };
+type AppState =
+  | { kind: "connect"; notice: string | null }
+  /** The email flow: register, confirm the mailbox, or both. */
+  | { kind: "auth"; start: AuthStart }
+  /** Signed in by email on testnet; the key is still to be pasted. */
+  | { kind: "key"; session: AccountsSession; notice: string | null }
+  | { kind: "ready"; booted: Booted; session: AccountsSession | null };
 
 async function boot(config: WebChainConfig, connection: ExpertConnection): Promise<Booted> {
   const chain = createWebChain(config, connection);
@@ -135,6 +145,12 @@ export function App() {
   // Public, so a reload may keep it. The key is never kept; see session/remembered.ts.
   const remembered = useMemo(() => browserAccount.load(), []);
   const autoConnected = useRef(false);
+  // The email side. Null when no accounts API is configured, and then the
+  // screen offers the key path only. Holds no state: the session lives here.
+  const accounts = useMemo(
+    () => (config.ok && config.config.accountsApiUrl !== null ? new AccountsClient({ baseUrl: config.config.accountsApiUrl }) : null),
+    [config],
+  );
 
   // Mock mode has no key, so a remembered account reconnects on its own and a
   // refresh is never a loss. Testnet asks for the key again, by design.
@@ -143,7 +159,7 @@ export function App() {
     autoConnected.current = true;
     const mode = config.config;
     void boot(mode, { mode: "mock", accountId: remembered }).then(
-      (booted) => setState((current) => (current.kind === "connect" ? { kind: "ready", booted } : current)),
+      (booted) => setState((current) => (current.kind === "connect" ? { kind: "ready", booted, session: null } : current)),
       () => browserAccount.forget(),
     );
   }, [config, remembered]);
@@ -157,24 +173,91 @@ export function App() {
     );
   }
 
-  if (state.kind === "connect") {
+  const mode = config.config;
+  const credential = mode.mode === "mock" ? { label: "Demo reviewer", tag: FAKE_CERT_TAG } : null;
+
+  /**
+   * A session is who is at the keyboard. On the mock there is no key, so it
+   * boots straight away; on testnet the key is one more screen. The session
+   * rides along into the ready state so disconnect can end it server-side.
+   */
+  const afterSignIn = async (session: AccountsSession): Promise<ConnectOutcome> => {
+    const accountId = session.account.hederaAccountId;
+    if (mode.mode === "testnet") {
+      setState({ kind: "key", session, notice: null });
+      return { ok: true };
+    }
+    try {
+      const booted = await boot(mode, { mode: "mock", accountId });
+      browserAccount.save(accountId);
+      setState({ kind: "ready", booted, session });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: describeConnectError(error, accountId) };
+    }
+  };
+
+  if (state.kind === "auth" && accounts !== null) {
+    return (
+      <AuthFlow
+        mode={mode.mode}
+        accounts={accounts}
+        start={state.start}
+        onSignedIn={(session) => void afterSignIn(session)}
+        onCancel={() => setState({ kind: "connect", notice: null })}
+        onBringKey={() => setState({ kind: "connect", notice: null })}
+      />
+    );
+  }
+
+  if (state.kind === "connect" || state.kind === "key" || state.kind === "auth") {
+    const session = state.kind === "key" ? state.session : null;
     const connect = async (connection: ExpertConnection): Promise<ConnectOutcome> => {
       try {
-        const booted = await boot(config.config, connection);
+        const booted = await boot(mode, connection);
         browserAccount.save(connection.accountId);
-        setState({ kind: "ready", booted });
+        setState({ kind: "ready", booted, session });
         return { ok: true };
       } catch (error) {
         return { ok: false, message: describeConnectError(error, connection.accountId) };
       }
     };
+    const email =
+      accounts === null
+        ? null
+        : {
+            onSubmit: async (identifier: string, password: string): Promise<ConnectOutcome> => {
+              try {
+                const signedIn = await accounts.signIn(identifier, password);
+                return afterSignIn(signedIn);
+              } catch (error) {
+                const failure = describeAccountsError(error);
+                if (failure.needsVerification) {
+                  // The password was right. The mailbox is not confirmed; that is a screen, not an error.
+                  const id = parseAccountIdOrNull(identifier);
+                  setState({
+                    kind: "auth",
+                    start: { kind: "verify", identifier, password, hederaAccountId: id, email: id === null ? identifier : null },
+                  });
+                  return { ok: true };
+                }
+                return { ok: false, message: failure.message };
+              }
+            },
+            onCreateAccount: () => setState({ kind: "auth", start: { kind: "register" } }),
+          };
     return (
       <ConnectScreen
-        mode={config.config.mode}
-        prefill={remembered ?? config.config.expertAccountIdPrefill}
-        notice={state.notice}
+        // The key step is a different screen with the same fields; a fresh mount clears the form.
+        key={state.kind}
+        mode={mode.mode}
+        prefill={session === null ? (remembered ?? mode.expertAccountIdPrefill) : session.account.hederaAccountId}
+        notice={state.kind === "auth" ? null : state.notice}
         onConnect={connect}
-        credential={config.config.mode === "mock" ? { label: "Demo reviewer", tag: FAKE_CERT_TAG } : null}
+        credential={credential}
+        email={email}
+        locked={session !== null}
+        onBack={session === null ? undefined : () => setState({ kind: "connect", notice: null })}
       />
     );
   }
@@ -185,6 +268,8 @@ export function App() {
       onDisconnect={() => {
         state.booted.chain.disconnect();
         browserAccount.forget();
+        // Best effort, and idempotent server-side. The token dies with this state either way.
+        if (state.session !== null && accounts !== null) void accounts.signOut(state.session.token).catch(() => {});
         setState({
           kind: "connect",
           notice: "Disconnected. A verdict you published stays published, and your unsigned notes are kept.",
@@ -192,6 +277,12 @@ export function App() {
       }}
     />
   );
+}
+
+/** For routing an unconfirmed sign-in: the identifier, when it was the account id. */
+function parseAccountIdOrNull(identifier: string): string | null {
+  const parsed = parseAccountId(identifier.trim());
+  return parsed.ok ? parsed.accountId : null;
 }
 
 /** How often the inbox re-reads the topic, so a claim by someone else shows up. */

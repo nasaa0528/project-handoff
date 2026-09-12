@@ -26,6 +26,13 @@ export type ChainMode = "mock" | "testnet";
 interface Common {
   /** Prefills the connect screen. Optional, and never the source of who signs. */
   readonly expertAccountIdPrefill: string | null;
+  /**
+   * The accounts API, for signing in with an email. Optional: without it the
+   * connect screen offers the key path only. A session there is a profile
+   * keyed on the Hedera account and holds no key, so it changes who is at
+   * the keyboard and nothing about signing.
+   */
+  readonly accountsApiUrl: string | null;
   /** Where orders and claims are published and, until P1 says otherwise, attestations too. */
   readonly ordersTopicId: string;
 }
@@ -143,6 +150,12 @@ function serviceUrl(env: Env, name: string, fallback?: string): string {
   return value.replace(/\/+$/, "");
 }
 
+/** A URL that may be absent. Present means every rule of `serviceUrl` applies. */
+function optionalServiceUrl(env: Env, name: string): string | null {
+  const value = env[name]?.trim();
+  return value === undefined || value === "" ? null : serviceUrl(env, name);
+}
+
 /**
  * Hard rule 2, as a startup failure. Two checks: a name that says secret,
  * and a value shaped like a private key under any name. Neither message
@@ -170,11 +183,13 @@ export function configFromEnv(env: Env): WebChainConfig {
   }
 
   const expertAccountIdPrefill = optionalAccountId(env, "VITE_EXPERT_ACCOUNT_ID");
+  const accountsApiUrl = optionalServiceUrl(env, "VITE_ACCOUNTS_API_URL");
 
   if (mode === "mock") {
     return {
       mode,
       expertAccountIdPrefill,
+      accountsApiUrl,
       ordersTopicId: env["VITE_HANDOFF_ORDERS_TOPIC_ID"]?.trim() || "MOCK-topic-orders",
       mock: {
         requesterAccountId: env["VITE_MOCK_REQUESTER_ACCOUNT_ID"]?.trim() || "MOCK-requester",
@@ -193,6 +208,7 @@ export function configFromEnv(env: Env): WebChainConfig {
   return {
     mode,
     expertAccountIdPrefill,
+    accountsApiUrl,
     ordersTopicId,
     mirrorNodeUrl,
     contentUrl,

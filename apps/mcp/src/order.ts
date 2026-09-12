@@ -12,10 +12,12 @@
  * about them, and there is a test that greps the published body for the input
  * text to keep it that way.
  *
- * **No schedule at post time.** `ScheduleCreate` carries a fully formed inner
- * transfer, so the payee has to be known, and at `POSTED` nobody has claimed
- * yet. The schedule is created at claim time. See
- * `../../../docs/research/hedera-primitives-verified.md`.
+ * **No payout record at post time.** The payee has to be known and at `POSTED`
+ * nobody has claimed yet. The record is created at settle, not at claim: the
+ * claim is an HCS message from the expert's own account, so this server learns
+ * of it through a mirror read and has no claim-time hook to hang it on. See
+ * `./settle.ts` and
+ * `../../../docs/decisions/2026-09-12-settle-is-an-explicit-endpoint-and-idempotency-lives-on-the-mirror.md`.
  *
  * **`review` only.** The `execution` class exists in the schema and in the
  * architecture, and building a working execution path is Tier 3 this week. A
@@ -229,8 +231,8 @@ export async function postReviewOrder(
     );
   }
 
-  // No createSchedule here. The payee is unknown until somebody claims, and
-  // ScheduleCreate needs a fully formed inner transfer.
+  // No createSchedule here. The payee is unknown until somebody claims, and a
+  // payout record is a hash of parameters that include the payee.
 
   const posted: PostedOrder = {
     ...packaged,

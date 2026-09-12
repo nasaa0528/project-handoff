@@ -7,7 +7,7 @@
  * here rather than a change everywhere.
  */
 
-import { MockChainAdapter, type ChainAdapter } from "@handoff/schema";
+import { MOCK_ESCROW_ACCOUNT_ID, MockChainAdapter, type ChainAdapter } from "@handoff/schema";
 import {
   assertOperatorKeyMatches,
   createHederaChainAdapter,
@@ -101,6 +101,10 @@ async function main(): Promise<void> {
       content: contentFromEnv(mode),
       ordersTopicId: config.ordersTopicId,
       attestationsTopicId: config.attestationsTopicId,
+      // Read from the same place the adapter is given it, and from the mock's
+      // own constant otherwise. Two sources for one escrow id is how a settle
+      // ends up debiting an account the fund lock never credited.
+      escrowAccountId: mode === "testnet" ? required("HANDOFF_ESCROW_ACCOUNT_ID") : MOCK_ESCROW_ACCOUNT_ID,
       certTags: config.certTags,
     },
     { log: (line) => console.log(line) },

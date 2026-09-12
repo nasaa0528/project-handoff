@@ -21,6 +21,22 @@ export function toMirrorTransactionId(sdkTransactionId: string): string {
   return `${accountId}-${seconds}-${nanos}`;
 }
 
+/**
+ * The inverse. Mirror ids read back off the REST API are "0.0.1234-1699000000-000000000";
+ * every `TxRef` in this repo carries the SDK's "0.0.1234@1699000000.000000000", and a
+ * mirror-shaped id handed to `hashscanTransactionUrl` throws rather than linking. So an
+ * id that came from a mirror read is converted the moment it becomes a transaction id
+ * we report, never at the call site that happens to notice.
+ */
+export function fromMirrorTransactionId(mirrorTransactionId: string): string {
+  const match = /^(\d+\.\d+\.\d+)-(\d+)-(\d+)$/.exec(mirrorTransactionId);
+  if (!match) {
+    throw new Error(`Not a recognizable mirror transaction ID: "${mirrorTransactionId}"`);
+  }
+  const [, accountId, seconds, nanos] = match;
+  return `${accountId}@${seconds}.${nanos}`;
+}
+
 export function hashscanTransactionUrl(sdkTransactionId: string): string {
   return `${HASHSCAN_BASE_URL}/transaction/${toMirrorTransactionId(sdkTransactionId)}`;
 }
@@ -125,4 +141,82 @@ export async function waitForMirrorTransaction(
   }
 
   return null;
+}
+
+export interface MirrorTransfer {
+  account: string | null;
+  /**
+   * Tinybars, as the exact digits the mirror node sent.
+   *
+   * A string because it is money. The REST API serves this as a JSON *number*,
+   * and `JSON.parse` has already rounded anything past 2^53 by the time a
+   * caller could look at it — tinybars run to 5e18, which is three orders of
+   * magnitude past that. So the body is parsed with source-text access and
+   * these digits are taken verbatim, never through a `number`.
+   */
+  amount: string;
+}
+
+export interface MirrorAccountTransaction {
+  transaction_id: string;
+  consensus_timestamp: string;
+  result: string;
+  /** The API returns the memo base64-encoded on this endpoint; there is no `encoding` param for it. */
+  memo_base64: string | null;
+  transfers?: MirrorTransfer[];
+}
+
+/**
+ * Every successful transfer that **debited** one account, newest first.
+ *
+ * Query shape read off the published OpenAPI for `GET /api/v1/transactions`
+ * (docs.hedera.com, api-reference/transactions/list-transactions) rather than
+ * recalled: `account.id`, `transactiontype=CRYPTOTRANSFER`, `result=success`,
+ * `type=debit` (the account-balance-modification filter), `order`, `limit`.
+ *
+ * `type=debit` is what makes this cheap. The shared escrow sees a credit for
+ * every fund lock and a debit only when an order pays out, so filtering to
+ * debits turns "every transaction this escrow has ever seen" into "every
+ * payout", which is a far shorter list.
+ */
+export async function fetchMirrorAccountDebits(
+  mirrorNodeUrl: string,
+  accountId: string,
+  opts: { limit?: number; order?: "asc" | "desc" } = {},
+): Promise<MirrorAccountTransaction[]> {
+  const params = new URLSearchParams({
+    "account.id": accountId,
+    transactiontype: "CRYPTOTRANSFER",
+    result: "success",
+    type: "debit",
+    order: opts.order ?? "desc",
+    limit: String(opts.limit ?? 100),
+  });
+
+  const response = await fetch(`${mirrorNodeUrl}/transactions?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`Mirror node returned ${response.status} for ${accountId}'s debits`);
+  }
+
+  const body = parseWithExactAmounts(await response.text()) as {
+    transactions?: MirrorAccountTransaction[];
+  };
+  return body.transactions ?? [];
+}
+
+/**
+ * `JSON.parse`, keeping every `amount` as the digits that were on the wire.
+ *
+ * The reviver's third argument carries `source`, the raw text of the value
+ * being revived, for primitives only (V8 11.x, Node 21+; this workspace pins
+ * Node 24 in `.nvmrc`). It is the only way to read an integer JSON number
+ * exactly: by the time a plain parse hands it over it is already a rounded
+ * double. Guarded rather than assumed, so a runtime without it degrades to the
+ * ordinary string conversion instead of throwing.
+ */
+function parseWithExactAmounts(text: string): unknown {
+  return JSON.parse(text, function reviveExactAmounts(key, value, context?: { source?: string }) {
+    if (key !== "amount") return value;
+    return context?.source ?? String(value);
+  });
 }

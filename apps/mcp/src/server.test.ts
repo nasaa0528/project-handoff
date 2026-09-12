@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  encodeAttestation,
+  encodeClaim,
+  encodeEnvelope,
   FundLockError,
   FundLockSubmitError,
+  MOCK_ESCROW_ACCOUNT_ID,
   MockChainAdapter,
+  SCHEMA_VERSION,
   sha256Hex,
   signFundLock,
   type ChainAdapter,
@@ -64,6 +69,7 @@ function harness(options: { verify?: unknown; settle?: unknown } = {}) {
     content,
     ordersTopicId: "0.0.orders",
     attestationsTopicId: "0.0.9002",
+    escrowAccountId: MOCK_ESCROW_ACCOUNT_ID,
     certTags: [{ code: "cpa-us", label: "Licensed reviewer" }],
   };
   return { deps, paths, content };
@@ -798,5 +804,150 @@ describe("content, addressed by hash", () => {
     const read = await handle(content("GET", HASH), { ...deps, content: store });
 
     expect(read.status).toBe(502);
+  });
+});
+
+describe("POST /orders/:id/settle", () => {
+  const ATTESTATIONS = "0.0.9002";
+  const EXPERT = "0.0.expert";
+  const HASH_IN = sha256Hex("FAKE report");
+
+  function settle(orderId: string) {
+    return {
+      method: "POST",
+      path: `/orders/${orderId}/settle`,
+      headers: {},
+      body: Buffer.alloc(0),
+    } as const;
+  }
+
+  /** POSTED → CLAIMED → DELIVERED on the mock, the expert paying for their own messages. */
+  async function deliver(
+    chain: MockChainAdapter,
+    orderId: string,
+    options: { artifactHashIn?: string } = {},
+  ): Promise<void> {
+    await chain.submitMessage(
+      "0.0.orders",
+      encodeEnvelope({
+        order_id: orderId,
+        class: "review",
+        spec_hash: HASH_IN,
+        artifact_hash_in: HASH_IN,
+        cert_tag: "cpa-us",
+        price_tinybars: "20000000000",
+        deadline: futureUtc(60 * 60 * 24 * 7),
+        claim_timeout_seconds: 3600,
+        schema_version: SCHEMA_VERSION,
+      }),
+    );
+    await chain.publishClaim(
+      "0.0.orders",
+      EXPERT,
+      encodeClaim({ kind: "claim", order_id: orderId, cert_tag: "cpa-us", schema_version: SCHEMA_VERSION }),
+    );
+    await chain.publishClaim(
+      ATTESTATIONS,
+      EXPERT,
+      encodeAttestation({
+        order_id: orderId,
+        class: "review",
+        verdict: "reject",
+        defects: ["NO_MONITORING"],
+        notes_hash: HASH_IN,
+        artifact_hash_in: options.artifactHashIn ?? HASH_IN,
+        cert_tag: "cpa-us",
+        schema_version: SCHEMA_VERSION,
+      }),
+    );
+  }
+
+  it("releases the escrow to the claimant and reports the payout", async () => {
+    const { deps } = harness();
+    await deliver(deps.chain as MockChainAdapter, "ord_1");
+
+    const response = await handle(settle("ord_1"), deps);
+
+    expect(response.status).toBe(200);
+    // A reject pays. Hard rule 3, all the way out to the wire.
+    expect(response.body).toMatchObject({
+      state: "SETTLED",
+      payeeAccountId: EXPERT,
+      amountTinybars: "20000000000",
+    });
+  });
+
+  it("is ungated — settling never asks for a payment", async () => {
+    const { deps, paths } = harness();
+    await deliver(deps.chain as MockChainAdapter, "ord_1");
+
+    const response = await handle(settle("ord_1"), deps);
+
+    expect(response.status).not.toBe(402);
+    // The facilitator is not consulted at all: there is nothing to sell here.
+    expect(paths).not.toContain("/verify");
+    expect(paths).not.toContain("/settle");
+  });
+
+  it("answers 409 and retryable while the order is only claimed", async () => {
+    const { deps } = harness();
+    const chain = deps.chain as MockChainAdapter;
+    await chain.submitMessage(
+      "0.0.orders",
+      encodeEnvelope({
+        order_id: "ord_1",
+        class: "review",
+        spec_hash: HASH_IN,
+        artifact_hash_in: HASH_IN,
+        cert_tag: "cpa-us",
+        price_tinybars: "20000000000",
+        deadline: futureUtc(60 * 60 * 24 * 7),
+        claim_timeout_seconds: 3600,
+        schema_version: SCHEMA_VERSION,
+      }),
+    );
+    await chain.publishClaim(
+      "0.0.orders",
+      EXPERT,
+      encodeClaim({ kind: "claim", order_id: "ord_1", cert_tag: "cpa-us", schema_version: SCHEMA_VERSION }),
+    );
+
+    const response = await handle(settle("ord_1"), deps);
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ retryable: true, state: "CLAIMED" });
+  });
+
+  it("answers 409 and NOT retryable on a schema violation, so a poller stops", async () => {
+    const { deps } = harness();
+    const chain = deps.chain as MockChainAdapter;
+    await deliver(chain, "ord_1", { artifactHashIn: sha256Hex("something else entirely") });
+
+    const response = await handle(settle("ord_1"), deps);
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ error: "schema violation", retryable: false });
+  });
+
+  it("refuses anything but POST", async () => {
+    const { deps } = harness();
+
+    expect((await handle({ ...settle("ord_1"), method: "GET" }, deps)).status).toBe(405);
+  });
+
+  it("carries the transaction id out when a payout's outcome is unknown", async () => {
+    const { deps } = harness();
+    const chain = deps.chain as MockChainAdapter;
+    await deliver(chain, "ord_1");
+    vi.spyOn(chain, "signSchedule").mockRejectedValue(
+      new Error("the payout for order ord_1 was submitted as 0.0.1@2.3 and its outcome is unknown"),
+    );
+
+    const response = await handle(settle("ord_1"), deps);
+
+    expect(response.status).toBe(502);
+    // Never flattened. That id is the only thing that tells the caller whether
+    // the expert has been paid.
+    expect(JSON.stringify(response.body)).toContain("0.0.1@2.3");
   });
 });

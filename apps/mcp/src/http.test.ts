@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { MockChainAdapter } from "@handoff/schema";
+import { MOCK_ESCROW_ACCOUNT_ID, MockChainAdapter } from "@handoff/schema";
 import { InMemoryContentStore } from "./content.js";
 import { createHttpServer, MAX_BODY_BYTES } from "./http.js";
 import { Facilitator, type FetchLike } from "./x402/facilitator.js";
@@ -40,6 +40,7 @@ const deps: ServerDeps = {
   content: new InMemoryContentStore(),
   ordersTopicId: "0.0.orders",
   attestationsTopicId: "0.0.attestations",
+  escrowAccountId: MOCK_ESCROW_ACCOUNT_ID,
   certTags: [{ code: "cpa-us", label: "Licensed reviewer" }],
 };
 

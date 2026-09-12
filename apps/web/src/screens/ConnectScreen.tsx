@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { ChevronDown, ChevronRight, Lock, ShieldCheck, User } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Lock, Mail, ShieldCheck } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Logo } from "../components/Logo";
 import { ModeBanner } from "../components/ModeBanner";
 import { TestnetBadge } from "../components/TestnetBadge";
 import { parseAccountId } from "../session/accountId";
+import { assessSignIn } from "../session/accounts";
 import {
   assessConnect,
   balanceWords,
@@ -23,6 +24,30 @@ import { describeKeyShape, describePrivateKey, type KeyShape } from "../session/
 import { lookupAccount, type AccountLookup } from "../session/mirrorAccount";
 
 export type ConnectOutcome = { readonly ok: true } | { readonly ok: false; readonly message: string };
+
+/**
+ * The email side of the card. Present only when an accounts API is
+ * configured; the screen owns the two fields and hands the pair over once.
+ * The outcome is `ok` when the app moved on, so the card has nothing left
+ * to say; otherwise a sentence for under the button.
+ */
+export interface EmailSignIn {
+  readonly onSubmit: (identifier: string, password: string) => Promise<ConnectOutcome>;
+  readonly onCreateAccount: () => void;
+}
+
+/** The email form's state, for the card. */
+export interface EmailFields {
+  readonly identifier: string;
+  readonly password: string;
+  readonly busy: boolean;
+  readonly error: string | null;
+  readonly blockers: readonly string[];
+  readonly onIdentifier: (text: string) => void;
+  readonly onPassword: (text: string) => void;
+  readonly onSubmit: () => void;
+  readonly onCreateAccount: () => void;
+}
 
 export type LookupFn = (accountId: string, signal: AbortSignal) => Promise<AccountLookup>;
 
@@ -71,6 +96,9 @@ export function ConnectScreen({
   onConnect,
   lookup = defaultLookup,
   credential = null,
+  email = null,
+  locked = false,
+  onBack,
 }: {
   mode: ChainMode;
   prefill: string | null;
@@ -81,8 +109,18 @@ export function ConnectScreen({
   lookup?: LookupFn;
   /** The credential this build grants, shown once the id checks out. */
   credential?: CredentialPreview | null;
+  /** Sign in with an email. Null when no accounts API is configured. */
+  email?: EmailSignIn | null;
+  /** The account is settled by an email session; only the key is asked for. */
+  locked?: boolean;
+  /** From the locked step, back to the connect screen. */
+  onBack?: (() => void) | undefined;
 }) {
   const [accountIdText, setAccountIdText] = useState(prefill ?? "");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [keyShape, setKeyShape] = useState<KeyShape | null>(null);
   const [lastLookup, setLastLookup] = useState<AccountLookup | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -141,9 +179,41 @@ export function ConnectScreen({
     }
   }
 
+  async function signInWithEmail() {
+    if (email === null || emailBusy) return;
+    if (assessSignIn(identifier, password).length > 0) return;
+    setEmailBusy(true);
+    setEmailError(null);
+    try {
+      const outcome = await email.onSubmit(identifier.trim(), password);
+      if (!outcome.ok) setEmailError(outcome.message);
+      // On success the app has moved on; the password is dropped with this screen.
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  const emailFields: EmailFields | null =
+    email === null || locked
+      ? null
+      : {
+          identifier,
+          password,
+          busy: emailBusy,
+          error: emailError,
+          blockers: assessSignIn(identifier, password),
+          onIdentifier: setIdentifier,
+          onPassword: setPassword,
+          onSubmit: () => void signInWithEmail(),
+          onCreateAccount: email.onCreateAccount,
+        };
+
   return (
     <ConnectCard
       mode={mode}
+      email={emailFields}
+      locked={locked}
+      onBack={onBack}
       accountIdText={accountIdText}
       assessment={assessment}
       lookup={currentLookup}
@@ -250,6 +320,9 @@ export function ConnectCard({
   notice,
   busy,
   credential = null,
+  email = null,
+  locked = false,
+  onBack,
   keyRef,
   onAccountIdChange,
   onKeyChange,
@@ -257,6 +330,11 @@ export function ConnectCard({
   onConnect,
 }: {
   mode: ChainMode;
+  /** The email form. Null when there is no accounts API, or on the locked step. */
+  email?: EmailFields | null;
+  /** The account came from an email session; only the key is asked for. */
+  locked?: boolean;
+  onBack?: (() => void) | undefined;
   accountIdText: string;
   assessment: ConnectAssessment;
   lookup: AccountLookup | null;
@@ -277,7 +355,24 @@ export function ConnectCard({
   const testnet = mode === "testnet";
   // The Hedera panel opens by itself when an id is already there, from a
   // reload or a prefill; otherwise it waits behind its toggle.
-  const [open, setOpen] = useState(accountIdText !== "");
+  // Two panels, one open at a time. Without an email form the Hedera panel is
+  // the only one, so it is simply open.
+  const [open, setOpen] = useState(accountIdText !== "" || email === null || locked);
+  const [emailOpen, setEmailOpen] = useState(email !== null && (email.identifier !== "" || email.error !== null));
+  const showEmail = () => {
+    setEmailOpen(true);
+    setOpen(false);
+  };
+  const showHedera = () => {
+    setOpen((o) => !o);
+    setEmailOpen(false);
+  };
+  const emailEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter" && email !== null) {
+      event.preventDefault();
+      email.onSubmit();
+    }
+  };
   const onEnter = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -305,9 +400,13 @@ export function ConnectCard({
           </div>
 
           <h1 id="connect-title" className="text-center font-serif text-[22px] leading-tight font-semibold tracking-tight">
-            Sign in as an expert
+            {locked ? "One more thing: your key" : "Sign in as an expert"}
           </h1>
-          <p className="mt-1.5 mb-7 text-center text-sm leading-relaxed text-muted-foreground">Review work, sign your verdict, get paid.</p>
+          <p className="mt-1.5 mb-7 text-center text-sm leading-relaxed text-muted-foreground">
+            {locked
+              ? "You are signed in. Signing a verdict needs the key of the account you registered, in this tab, in memory only."
+              : "Review work, sign your verdict, get paid."}
+          </p>
 
           {notice !== null && (
             <p role="status" className="mb-5 rounded-lg bg-secondary px-3 py-2 text-xs text-muted-foreground">
@@ -315,30 +414,102 @@ export function ConnectCard({
             </p>
           )}
 
-          {/* Not wired yet. Nothing behind it until the team says what sign-in means. */}
-          <Button type="button" size="lg" className="h-[52px] w-full rounded-[10px] text-[15px] font-semibold hover:bg-azure-hover" title="Not available yet">
-            <User className="size-[18px]" aria-hidden />
-            Sign in
-          </Button>
-          <p className="mt-2.5 text-center text-xs leading-snug text-faint">Sign in with your email to start reviewing.</p>
+          {email !== null && (
+            <>
+              {/* The button gives way to the fields: once open there is one Sign in on the card, not two. */}
+              {!emailOpen && (
+              <button
+                type="button"
+                aria-expanded={emailOpen}
+                aria-controls="connect-email-panel"
+                onClick={showEmail}
+                className="flex h-[52px] w-full items-center justify-center gap-2 rounded-[10px] bg-primary text-[15px] font-semibold text-primary-foreground transition-colors hover:bg-azure-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <Mail className="size-[18px]" aria-hidden />
+                Sign in with email
+                <ChevronDown className="size-3.5" aria-hidden />
+              </button>
+              )}
 
-          <div className="my-6 flex items-center gap-3" aria-hidden>
-            <span className="h-px flex-1 bg-border" />
-            <span className="text-[11px] font-medium tracking-[0.05em] whitespace-nowrap text-faint uppercase">or bring your own key</span>
-            <span className="h-px flex-1 bg-border" />
-          </div>
+              <div
+                id="connect-email-panel"
+                className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${emailOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+                inert={!emailOpen}
+              >
+              <div className="overflow-hidden">
+              {/* No <form>, for the same reason as the key field: a submitted form with a password asks the browser to save it. */}
+              <div className="grid gap-4">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="connect-email" className="text-[13px] font-semibold">
+                    Email
+                  </Label>
+                  <Input
+                    id="connect-email"
+                    value={email.identifier}
+                    onChange={(event) => email.onIdentifier(event.target.value)}
+                    onKeyDown={emailEnter}
+                    disabled={email.busy}
+                    placeholder="you@example.com"
+                    autoComplete="username"
+                    spellCheck={false}
+                    className="h-11 rounded-[10px] bg-secondary text-[13px] focus-visible:ring-primary/20"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="connect-password" className="text-[13px] font-semibold">
+                    Password
+                  </Label>
+                  <Input
+                    id="connect-password"
+                    type="password"
+                    value={email.password}
+                    onChange={(event) => email.onPassword(event.target.value)}
+                    onKeyDown={emailEnter}
+                    disabled={email.busy}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    className="h-11 rounded-[10px] bg-secondary text-[13px] focus-visible:ring-primary/20"
+                  />
+                </div>
+                {email.error !== null && (
+                  <Alert variant="destructive">
+                    <AlertTitle>Not signed in</AlertTitle>
+                    <AlertDescription>{email.error}</AlertDescription>
+                  </Alert>
+                )}
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-[52px] w-full rounded-[10px] text-[15px] font-semibold hover:bg-azure-hover"
+                  disabled={email.busy || email.blockers.length > 0}
+                  onClick={email.onSubmit}
+                >
+                  {email.busy ? "Signing in…" : "Sign in"}
+                  {!email.busy && <ChevronRight className="size-4" aria-hidden />}
+                </Button>
+              </div>
+              </div>
+              </div>
 
-          <button
-            type="button"
-            aria-expanded={open}
-            aria-controls="connect-hedera-panel"
-            onClick={() => setOpen((o) => !o)}
-            className="flex h-[52px] w-full items-center justify-center gap-1.5 rounded-[10px] border-[1.5px] border-border text-[13px] font-medium text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            <Lock className="size-3.5" aria-hidden />
-            Connect with your Hedera account
-            <ChevronDown className={`size-3 transition-transform duration-300 ${open ? "rotate-180" : ""}`} aria-hidden />
-          </button>
+              <div className="my-6 flex items-center gap-3" aria-hidden>
+                <span className="h-px flex-1 bg-border" />
+                <span className="text-[11px] font-medium tracking-[0.05em] whitespace-nowrap text-faint uppercase">already have a Hedera account?</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls="connect-hedera-panel"
+                onClick={showHedera}
+                className="flex h-[52px] w-full items-center justify-center gap-1.5 rounded-[10px] border-[1.5px] border-border text-[14px] font-semibold text-foreground transition-colors hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <Lock className="size-3.5" aria-hidden />
+                Sign in with Hedera
+                <ChevronDown className={`size-3 transition-transform duration-300 ${open ? "rotate-180" : ""}`} aria-hidden />
+              </button>
+            </>
+          )}
 
           <div
             id="connect-hedera-panel"
@@ -362,7 +533,8 @@ export function ConnectCard({
                     value={accountIdText}
                     onChange={(event) => onAccountIdChange(event.target.value)}
                     onKeyDown={onEnter}
-                    disabled={busy}
+                    disabled={busy || locked}
+                    readOnly={locked}
                     placeholder="0.0.12345"
                     autoComplete="off"
                     spellCheck={false}
@@ -370,7 +542,9 @@ export function ConnectCard({
                     className="h-11 rounded-[10px] bg-secondary font-mono text-[13px] focus-visible:ring-primary/20"
                   />
                   <Helper id="connect-account-help">
-                    Like an account number. It is public: the Hedera portal and Hashscan both show it.
+                    {locked
+                      ? "The account you registered. To sign as a different one, go back and sign in with its key."
+                      : "Like an account number. It is public: the Hedera portal and Hashscan both show it."}
                   </Helper>
                   {testnet && (
                     <div id="connect-account-status" role="status" className="min-h-5">
@@ -514,6 +688,20 @@ export function ConnectCard({
               </div>
             </div>
           </div>
+          {email !== null && (
+            <p className="mt-6 text-center text-xs text-muted-foreground">
+              New here?{" "}
+              <button type="button" onClick={email.onCreateAccount} className="font-semibold text-primary underline-offset-4 hover:underline">
+                Create an account
+              </button>
+            </p>
+          )}
+          {locked && onBack !== undefined && (
+            <button type="button" onClick={onBack} className="mx-auto mt-6 flex items-center gap-1 text-[13px] font-medium text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="size-3.5" aria-hidden />
+              Back
+            </button>
+          )}
         </section>
 
         <p className="mt-4 max-w-[480px] text-center text-xs text-faint">

@@ -36,6 +36,27 @@
 Facilitator is `https://api.testnet.blocky402.com`, network `hedera:testnet`. Never
 `api.blocky402.com`, which is mainnet.
 
+## Settling: POST /orders/:id/settle
+
+The escrow release. Ungated — the gate covers order posting only — because it sells
+nothing: it moves money the requester already locked, to the expert who already signed,
+on facts that are already public.
+
+Three rules decide whether money moves, and each has a file-level comment saying so:
+
+- **Only the claimant's own attestation pays.** The attestations topic has no submit key.
+  A stray attestation is noise, not a violation — it must not pay and must not shadow the
+  holder's real one.
+- **The verdict is never read.** A reject is a delivered product and gets paid. There is
+  deliberately no `if (verdict === ...)` in `settle.ts`.
+- **A violation is mechanical or it is not one.** Class mismatch, an artifact hash the
+  order never named, the wrong credential tag. Never a disagreement about the work.
+
+**Never turn this into a watcher.** `PendingPayoutStore` is in-memory, so a loop that
+re-scans the attestations topic pays twice after any restart. The guarantee that survives
+a restart is the payout memo on the mirror node, which is what makes a *retry* safe —
+that is a reason to let a caller retry, not a reason to poll for them.
+
 ## What this app must never do
 
 - **Never confuse the two money flows.** The x402 micropayment is the service fee for
