@@ -31,7 +31,8 @@ import fakeSpec from "../../../../assets/demo/fake-review-spec.txt?raw";
 import fakeVendorClause from "../../../../assets/demo/fake-vendor-clause.txt?raw";
 import fakeVendorSpec from "../../../../assets/demo/fake-vendor-spec.txt?raw";
 import type { ContentStore } from "../content";
-import { claimBody, claimRecordsFor, claimStateFor, type ClaimReader } from "../orders/claim";
+import { claimBody, claimCandidateAccountIdFor, claimRecordsFor, claimStateFor, type ClaimReader } from "../orders/claim";
+import { deliveredStateFor, type DeliveredState } from "../orders/delivery";
 import { countWords, type ClaimState, type ExpertOrder, type InboxEntry } from "../orders/order";
 import type { OrderSource } from "../orders/source";
 import { notesToBytes, sha256HexOfBytes } from "../sign/notes";
@@ -236,20 +237,45 @@ export class MockOrderSource implements OrderSource {
     return new MockOrderSource(chain, content, options, orders, raced, reader);
   }
 
-  /** The treaty's rule, with the clock the mock was built with. */
-  #state(order: ExpertOrder, messages: readonly TopicMessage[]): ClaimState {
+  /**
+   * The treaty's rule, with the clock the mock was built with, and the same two
+   * passes the testnet source makes.
+   *
+   * The mock publishes attestations to its own attestations topic through the
+   * very same `signAndPublish`, so it can and must answer "already signed" the
+   * same way. A mock that said "not signed yet" about an order it had just
+   * signed would hide the bug this fixes from every mock-mode test.
+   */
+  #facts(
+    order: ExpertOrder,
+    messages: readonly TopicMessage[],
+    attestations: readonly TopicMessage[],
+  ): { readonly claim: ClaimState; readonly delivered: DeliveredState | null } {
     const now = this.#options.now ?? Date.now;
-    return claimStateFor(
+    const nowSeconds = Math.floor(now() / 1000);
+    const records = claimRecordsFor(messages, order.envelope.order_id);
+    const candidate = claimCandidateAccountIdFor(order.envelope, records, nowSeconds);
+    const delivered = deliveredStateFor(order.envelope, attestations, candidate, this.#options.expertAccountId);
+    const claim = claimStateFor(
       order.envelope,
-      claimRecordsFor(messages, order.envelope.order_id),
+      records,
       this.#options.expertAccountId,
-      Math.floor(now() / 1000),
+      nowSeconds,
+      delivered?.consensusTimestamp,
     );
+    return { claim, delivered };
+  }
+
+  async #bothTopics(): Promise<readonly [readonly TopicMessage[], readonly TopicMessage[]]> {
+    return Promise.all([
+      this.reader.readMessages(this.#options.ordersTopicId),
+      this.reader.readMessages(this.#options.attestationsTopicId),
+    ]);
   }
 
   async list(): Promise<readonly InboxEntry[]> {
-    const messages = await this.reader.readMessages(this.#options.ordersTopicId);
-    return this.#orders.map((order) => ({ order, claim: this.#state(order, messages) }));
+    const [messages, attestations] = await this.#bothTopics();
+    return this.#orders.map((order) => ({ order, ...this.#facts(order, messages, attestations) }));
   }
 
   async claim(order: ExpertOrder): Promise<ConsensusRef> {
@@ -266,9 +292,13 @@ export class MockOrderSource implements OrderSource {
   async document(order: ExpertOrder): Promise<string> {
     // The topic decides, not the caller. Showing the document to a
     // non-claimant would leak access-controlled content.
-    const messages = await this.reader.readMessages(this.#options.ordersTopicId);
-    const state = this.#state(order, messages);
-    if (state.kind !== "yours") throw new Error("The document opens after a confirmed claim.");
+    const [messages, attestations] = await this.#bothTopics();
+    const { claim, delivered } = this.#facts(order, messages, attestations);
+    // Held by this expert, or already signed by them: reopening the order you
+    // judged is the ordinary way to read back what you signed.
+    if (claim.kind !== "yours" && delivered?.yours !== true) {
+      throw new Error("The document opens after a confirmed claim.");
+    }
     const bytes = await this.#content.get(order.envelope.artifact_hash_in);
     if (bytes === null) throw new Error("The document is not in the content store.");
     return new TextDecoder().decode(bytes);
