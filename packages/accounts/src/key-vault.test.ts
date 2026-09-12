@@ -69,7 +69,7 @@ describe("what must not decrypt", () => {
     const blob = await encryptPrivateKey(KEY, PASSWORD, ACCOUNT, PEPPER);
     const parts = blob.split("$");
     const ciphertext = Buffer.from(parts[7] as string, "base64");
-    ciphertext[0] ^= 0x01;
+    ciphertext.writeUInt8(ciphertext.readUInt8(0) ^ 0x01, 0);
     parts[7] = ciphertext.toString("base64");
     await expect(decryptPrivateKey(parts.join("$"), PASSWORD, ACCOUNT, PEPPER)).rejects.toThrow(
       KeyVaultError,

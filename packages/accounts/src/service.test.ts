@@ -7,7 +7,9 @@ import {
   type AccountErrorCode,
   type EmailCodeMessage,
   type EmailCodeSender,
+  type HederaAccountProvisioner,
 } from "./service.js";
+import { decryptPrivateKey } from "./key-vault.js";
 import type { AccountExistenceCheck } from "./hedera-account.js";
 
 const pepper = codePepper("deadbeef".repeat(8));
@@ -35,6 +37,7 @@ function setup(
     readonly check?: AccountExistenceCheck;
     readonly allowUnverifiedSignIn?: boolean;
     readonly sender?: EmailCodeSender;
+    readonly provision?: HederaAccountProvisioner;
   } = {},
 ) {
   const clock = new TestClock();
@@ -49,6 +52,7 @@ function setup(
     ...(options.allowUnverifiedSignIn === undefined
       ? {}
       : { allowUnverifiedSignIn: options.allowUnverifiedSignIn }),
+    ...(options.provision === undefined ? {} : { provisionHederaAccount: options.provision }),
     now: clock.now,
   });
 
@@ -472,5 +476,135 @@ describe("profile", () => {
     const { service } = setup();
     await expectCode(service.getProfile("0.0.999999"), "account_not_found");
     await expectCode(service.updateProfile("0.0.999999", { firstName: "X" }), "account_not_found");
+  });
+});
+
+
+/**
+ * The custodial registration path, granted by
+ * `docs/decisions/2026-09-12-platform-creates-and-stores-expert-key.md`.
+ *
+ * The provisioner is a fake: this package must not import the Hedera SDK, and the
+ * real one lives in `packages/chain`. What is worth pinning here is everything
+ * around the ledger call — that it happens only when asked for, only after the
+ * registration is known to be storable, and that the key it returns is encrypted
+ * before it is written anywhere.
+ */
+describe("register, when the platform makes the account", () => {
+  const PROVISIONED_KEY = "3030020100300706052b8104000a04220420" + "ab".repeat(32);
+
+  function fakeProvisioner(accountId = "0.0.9001") {
+    const calls: number[] = [];
+    const provision: HederaAccountProvisioner = async () => {
+      calls.push(Date.now());
+      return {
+        hederaAccountId: accountId,
+        privateKey: PROVISIONED_KEY,
+        transactionId: "0.0.2@1757600000.000000000",
+      };
+    };
+    return { provision, calls };
+  }
+
+  /** Registration minus the account id: the shape that asks for one. */
+  const withoutAccount = (() => {
+    const { hederaAccountId: _ignored, ...rest } = registration;
+    return rest;
+  })();
+
+  it("creates an account and keys the row on it", async () => {
+    const { provision } = fakeProvisioner();
+    const { service, store } = setup({ provision });
+
+    const result = await service.register(withoutAccount);
+
+    expect(result.profile.hederaAccountId).toBe("0.0.9001");
+    expect(await store.findByAccountId("0.0.9001")).not.toBeNull();
+  });
+
+  it("surfaces the AccountCreate transaction id rather than swallowing it", async () => {
+    const { provision } = fakeProvisioner();
+    const { service } = setup({ provision });
+
+    expect((await service.register(withoutAccount)).accountCreatedTx).toBe(
+      "0.0.2@1757600000.000000000",
+    );
+  });
+
+  it("stores the key encrypted, never in the clear", async () => {
+    const { provision } = fakeProvisioner();
+    const { service, store } = setup({ provision });
+
+    await service.register(withoutAccount);
+    const stored = await store.findByAccountId("0.0.9001");
+
+    expect(stored?.encryptedPrivateKey).toBeDefined();
+    expect(stored?.encryptedPrivateKey).not.toContain(PROVISIONED_KEY);
+    expect(JSON.stringify(stored)).not.toContain(PROVISIONED_KEY);
+  });
+
+  it("stores a key the owner's password opens, and nobody else's", async () => {
+    const { provision } = fakeProvisioner();
+    const { service, store } = setup({ provision });
+
+    await service.register(withoutAccount);
+    const blob = (await store.findByAccountId("0.0.9001"))?.encryptedPrivateKey as string;
+
+    expect(await decryptPrivateKey(blob, registration.password, "0.0.9001", pepper)).toBe(
+      PROVISIONED_KEY,
+    );
+    await expect(decryptPrivateKey(blob, "some other password", "0.0.9001", pepper)).rejects.toThrow();
+  });
+
+  it("never puts the key or the blob on the profile the client sees", async () => {
+    const { provision } = fakeProvisioner();
+    const { service } = setup({ provision });
+
+    const result = await service.register(withoutAccount);
+    const serialised = JSON.stringify(result.profile);
+
+    expect(serialised).not.toContain(PROVISIONED_KEY);
+    expect(serialised).not.toContain("encryptedPrivateKey");
+    expect(result.profile.keyCustody).toBe("platform");
+  });
+
+  it("says the account is self-custodied when the caller brought their own", async () => {
+    const { service } = setup();
+    expect((await service.register(registration)).profile.keyCustody).toBe("self");
+  });
+
+  it("does not touch the ledger when a registration cannot land anyway", async () => {
+    // The ordering that matters: creating the account spends operator HBAR and
+    // cannot be undone, so a taken email must lose before the provisioner runs.
+    const { provision, calls } = fakeProvisioner();
+    const { service } = setup({ provision });
+
+    await service.register({ ...withoutAccount, username: "First" });
+    expect(calls).toHaveLength(1);
+
+    await expectCode(service.register({ ...withoutAccount, username: "Second" }), "account_exists");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("does not check the mirror for an account it is about to create", async () => {
+    const { provision } = fakeProvisioner();
+    const checked: string[] = [];
+    const { service } = setup({
+      provision,
+      check: async (id) => {
+        checked.push(id);
+        return "missing";
+      },
+    });
+
+    // "missing" would reject a bring-your-own registration; here nothing is asked.
+    await expect(service.register(withoutAccount)).resolves.toBeDefined();
+    expect(checked).toEqual([]);
+  });
+
+  it("refuses to register without an id when the deployment cannot create accounts", async () => {
+    const { service } = setup();
+    const error = await expectCode(service.register(withoutAccount), "validation_failed");
+    expect(error.field).toBe("hederaAccountId");
   });
 });
