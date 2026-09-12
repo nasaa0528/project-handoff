@@ -244,8 +244,17 @@ async function register(request: HttpRequest, deps: RouteDeps): Promise<HttpResu
   // 201 with the profile, and never the code. The code goes to the mailbox; a
   // client that could read it from this response would make the whole
   // verification step decorative.
+  //
+  // Never the private key either, on the path where the platform just created the
+  // account. The client is told the account id and the transaction that made it —
+  // enough to look the account up on a mirror node or Hashscan — and the key stays
+  // encrypted in the row. `publicProfile` is what enforces that rather than this
+  // handler remembering to.
   return ok(201, {
     account: result.profile,
+    ...(result.accountCreatedTx === undefined
+      ? {}
+      : { accountCreated: { transactionId: result.accountCreatedTx } }),
     verification: {
       sent: result.verificationSent,
       expiresAt: result.verificationExpiresAt,

@@ -3,6 +3,7 @@ import {
   codePepper,
   InMemoryAccountStore,
   type EmailCodeMessage,
+  type HederaAccountProvisioner,
 } from "@handoff/accounts";
 import { describe, expect, it } from "vitest";
 import { handle, type HttpRequest, type RouteDeps } from "./routes.js";
@@ -19,13 +20,19 @@ const registration = {
   password: "correct horse battery",
 };
 
-function setup(options: { readonly allowedOrigins?: readonly string[] } = {}) {
+function setup(
+  options: {
+    readonly allowedOrigins?: readonly string[];
+    readonly provision?: HederaAccountProvisioner;
+  } = {},
+) {
   const sent: EmailCodeMessage[] = [];
   const store = new InMemoryAccountStore();
   const service = new AccountService({
     store,
     pepper,
     sendEmailCode: async (message) => void sent.push(message),
+    ...(options.provision === undefined ? {} : { provisionHederaAccount: options.provision }),
   });
 
   const deps: RouteDeps = {
@@ -497,5 +504,81 @@ describe("CORS", () => {
 
     expect(result.status).toBe(204);
     expect(result.headers["Access-Control-Allow-Methods"]).toContain("POST");
+  });
+});
+
+
+/**
+ * The custodial registration path over the wire. `packages/accounts` already
+ * covers the encryption; what only this layer can prove is that no part of the
+ * created key leaves through an HTTP response.
+ */
+describe("POST /v1/accounts, when the platform makes the account", () => {
+  const KEY = "3030020100300706052b8104000a04220420" + "ab".repeat(32);
+
+  const provision: HederaAccountProvisioner = async () => ({
+    hederaAccountId: "0.0.9001",
+    privateKey: KEY,
+    transactionId: "0.0.2@1757600000.000000000",
+  });
+
+  const withoutAccount = (() => {
+    const { hederaAccountId: _ignored, ...rest } = registration;
+    return rest;
+  })();
+
+  it("returns 201 with the account it created", async () => {
+    const { call } = setup({ provision });
+    const response = await call("POST", "/v1/accounts", withoutAccount);
+
+    expect(response.status).toBe(201);
+    expect((response.body as { account: { hederaAccountId: string } }).account.hederaAccountId).toBe(
+      "0.0.9001",
+    );
+  });
+
+  it("names the AccountCreate transaction so the account can be looked up", async () => {
+    const { call } = setup({ provision });
+    const response = await call("POST", "/v1/accounts", withoutAccount);
+
+    expect((response.body as { accountCreated: { transactionId: string } }).accountCreated).toEqual({
+      transactionId: "0.0.2@1757600000.000000000",
+    });
+  });
+
+  it("never puts the private key in the response", async () => {
+    const { call } = setup({ provision });
+    const response = await call("POST", "/v1/accounts", withoutAccount);
+
+    const serialised = JSON.stringify(response.body);
+    expect(serialised).not.toContain(KEY);
+    expect(serialised).not.toContain("privateKey");
+    expect(serialised).not.toContain("encryptedPrivateKey");
+  });
+
+  it("tells the client which accounts the platform holds a key for", async () => {
+    const { call } = setup({ provision });
+    const created = await call("POST", "/v1/accounts", withoutAccount);
+    expect((created.body as { account: { keyCustody: string } }).account.keyCustody).toBe("platform");
+
+    const { call: plain } = setup();
+    const brought = await plain("POST", "/v1/accounts", registration);
+    expect((brought.body as { account: { keyCustody: string } }).account.keyCustody).toBe("self");
+  });
+
+  it("says nothing about a created account when the caller brought their own", async () => {
+    const { call } = setup({ provision });
+    const response = await call("POST", "/v1/accounts", registration);
+
+    expect(response.status).toBe(201);
+    expect((response.body as { accountCreated?: unknown }).accountCreated).toBeUndefined();
+  });
+
+  it("400s the omitted id when the server does not create accounts", async () => {
+    const { call } = setup();
+    const response = await call("POST", "/v1/accounts", withoutAccount);
+
+    expect(response.status).toBe(400);
+    expect((response.body as { error: { field: string } }).error.field).toBe("hederaAccountId");
   });
 });
