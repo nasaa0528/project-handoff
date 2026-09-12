@@ -10,6 +10,7 @@ const mockConfig: WebChainConfig = {
   expertAccountIdPrefill: null,
   accountsApiUrl: null,
   ordersTopicId: "MOCK-topic-orders",
+  attestationsTopicId: "MOCK-topic-attestations",
   mock: { requesterAccountId: "MOCK-requester", priceHbar: "100" },
 };
 const testnetConfig: WebChainConfig = {
@@ -17,6 +18,7 @@ const testnetConfig: WebChainConfig = {
   expertAccountIdPrefill: null,
   accountsApiUrl: null,
   ordersTopicId: "0.0.4242",
+  attestationsTopicId: "0.0.4243",
   mirrorNodeUrl: "https://testnet.mirrornode.hedera.com/api/v1",
   contentUrl: "https://content.example",
   escrowAccountId: "0.0.999",

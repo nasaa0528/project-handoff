@@ -19,6 +19,12 @@ surface before it is a codebase.
   the schema package so the UI and the verifier agree by construction.
 - **Never send the expert's written notes on-chain.** They go to the content store and
   only `notes_hash` is published.
+- **Never publish the attestation to the orders topic.** Orders and claims go to
+  `VITE_HANDOFF_ORDERS_TOPIC_ID`; the verdict goes to
+  `VITE_HANDOFF_ATTESTATIONS_TOPIC_ID`, which is what `apps/mcp` reads. The two are
+  different topics, and getting it wrong fails silently: the submit succeeds, the
+  verifier finds nothing, and the payout never fires. `OrderForSigning` names the
+  field `attestationsTopicId` so the orders topic cannot be passed by accident.
 - **Never treat a claim as settled before the mirror says so.** Consensus timestamp
   decides who won. The button may acknowledge the click instantly, but the workspace
   opens only on a confirmed claim, and losing the race is an ordinary outcome rather
@@ -220,7 +226,10 @@ sits there.
   unauthenticated, from `VITE_HANDOFF_API_URL`. It defaults to `VITE_CONTENT_URL` without
   its trailing `/content`, since one process answers both, and refuses to guess when the
   content URL is shaped otherwise.
-- Testnet needs `VITE_HANDOFF_ORDERS_TOPIC_ID`, `VITE_CONTENT_URL` and
-  `VITE_HANDOFF_ESCROW_ACCOUNT_ID`; `VITE_HEDERA_MIRROR_NODE_URL` is optional and
-  defaults to the public testnet mirror. A URL that mentions mainnet refuses to boot.
+- Testnet needs `VITE_HANDOFF_ORDERS_TOPIC_ID`, `VITE_HANDOFF_ATTESTATIONS_TOPIC_ID`,
+  `VITE_CONTENT_URL` and `VITE_HANDOFF_ESCROW_ACCOUNT_ID`; `VITE_HEDERA_MIRROR_NODE_URL`
+  is optional and defaults to the public testnet mirror. A URL that mentions mainnet
+  refuses to boot. The two topic ids are different topics and both are required, so a
+  missing attestations topic stops the app booting rather than sending the verdict
+  somewhere nobody reads.
 

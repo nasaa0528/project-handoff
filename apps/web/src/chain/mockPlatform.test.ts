@@ -5,10 +5,12 @@ import { FAKE_ARTIFACT, FAKE_SPEC, MockPlatform, seedClaimedReviewOrder, withSim
 const FIXED_NOW = Date.UTC(2026, 8, 5, 12, 0, 0);
 const EXPERT = "0.0.12345";
 const TOPIC = "MOCK-topic-orders";
+const ATT_TOPIC = "MOCK-topic-attestations";
 
 function seed(chain: MockChainAdapter) {
   return seedClaimedReviewOrder(chain, {
     ordersTopicId: TOPIC,
+    attestationsTopicId: ATT_TOPIC,
     requesterAccountId: "MOCK-requester",
     priceHbar: "100",
     now: () => FIXED_NOW,
@@ -23,7 +25,7 @@ describe("seedClaimedReviewOrder", () => {
     expect(order.envelope.price_tinybars).toBe("10000000000");
     expect(order.envelope.class).toBe("review");
     expect(order.escrowAccountId).toMatch(/^MOCK-escrow-/);
-    expect(order.topicId).toBe(TOPIC);
+    expect(order.attestationsTopicId).toBe(ATT_TOPIC);
 
     // Both ids the posting produced come back. Neither is swallowed.
     expect(order.transactionIds.fundLock).toMatch(/^MOCK-tx-/);

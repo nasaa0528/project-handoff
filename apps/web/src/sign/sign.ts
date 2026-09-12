@@ -33,8 +33,16 @@ export interface OrderForSigning {
   readonly envelope: ReviewOrder;
   /** Where the order value is locked. Shown, never touched by this app. */
   readonly escrowAccountId: string;
-  /** The topic the attestation is published to. */
-  readonly topicId: string;
+  /**
+   * The attestations topic, and never the orders topic.
+   *
+   * They are different topics with different provisioning, and publishing to
+   * the wrong one fails silently: the submit succeeds, the verifier reads the
+   * topic it was configured with, finds nothing, and the payout never fires.
+   * Named for the topic it is rather than `topicId` so a caller cannot pass
+   * the orders topic without noticing.
+   */
+  readonly attestationsTopicId: string;
 }
 
 export interface SignInput {
@@ -84,13 +92,13 @@ export async function signAndPublish(input: SignInput, deps: SignDeps): Promise<
 
   const notesRef = await deps.content.put(notes.hash, notes.bytes);
 
-  const consensus = await deps.chain.submitMessage(input.order.topicId, body);
+  const consensus = await deps.chain.submitMessage(input.order.attestationsTopicId, body);
 
   return {
     attestation,
     body,
     notesRef,
-    topicId: input.order.topicId,
+    topicId: input.order.attestationsTopicId,
     transactionId: consensus.transactionId,
     consensusTimestamp: consensus.consensusTimestamp,
     sequenceNumber: consensus.sequenceNumber,

@@ -98,6 +98,8 @@ const FIXTURES: readonly Fixture[] = [
 export interface MockOrdersOptions {
   readonly expertAccountId: string;
   readonly ordersTopicId: string;
+  /** Where the verdict goes. A separate topic here too, so the mock cannot hide the bug. */
+  readonly attestationsTopicId: string;
   readonly requesterAccountId: string;
   /** In HBAR, as a string. Never a float. */
   readonly priceHbar: string;
@@ -221,7 +223,8 @@ export class MockOrderSource implements OrderSource {
       orders.push({
         envelope,
         escrowAccountId: escrow.escrowAccountId,
-        topicId: options.ordersTopicId,
+        ordersTopicId: options.ordersTopicId,
+        attestationsTopicId: options.attestationsTopicId,
         title: fixture.title,
         ask: fixture.spec,
         documentWords: countWords(fixture.artifact),
