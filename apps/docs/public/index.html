@@ -97,8 +97,10 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* iOS Safari only honours this when html and body both carry it */
-  html, body { overflow-x: hidden; }
+  /* iOS Safari only honours this when html and body both carry it.
+     `clip` rather than `hidden`: `hidden` turns html/body into a scroll
+     container, which silently kills `position: sticky` on the sidebars. */
+  html, body { overflow-x: clip; }
 
   /* ── Nav ── */
   nav {
@@ -213,6 +215,7 @@
     width: 200px;
     flex-shrink: 0;
     transition: all 0.2s;
+    position: relative;
   }
 
   .nav-search:focus-within {
@@ -222,9 +225,21 @@
 
   .nav-search-icon {
     color: var(--ink-muted);
-    font-size: 13px;
     flex-shrink: 0;
-    opacity: 0.6;
+    opacity: 0.7;
+    display: flex;
+    align-items: center;
+  }
+
+  .nav-search-icon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+  }
+
+  .nav-search:focus-within .nav-search-icon {
+    opacity: 1;
+    color: var(--azure);
   }
 
   .nav-search input {
@@ -247,6 +262,65 @@
     border-radius: 4px;
     font-family: inherit;
     flex-shrink: 0;
+  }
+
+  .search-results {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 380px;
+    max-width: calc(100vw - 48px);
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+    padding: 6px;
+    z-index: 200;
+  }
+
+  .search-results[hidden] { display: none; }
+
+  .search-hit {
+    display: block;
+    text-decoration: none;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .search-hit.active { background: var(--sidebar-active); }
+
+  .search-hit-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.3;
+  }
+
+  .search-hit-snippet {
+    font-size: 12px;
+    color: var(--ink-muted);
+    line-height: 1.45;
+    margin-top: 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .search-hit mark {
+    background: var(--sidebar-active);
+    color: var(--azure);
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+
+  .search-empty {
+    padding: 10px;
+    font-size: 12px;
+    color: var(--ink-muted);
   }
 
   .nav-right {
@@ -1172,9 +1246,16 @@
     <div style="flex:1"></div>
 
     <div class="nav-search">
-      <span class="nav-search-icon">&#x2315;</span>
-      <input placeholder="Search docs..." />
-      <kbd>&#x2318;K</kbd>
+      <span class="nav-search-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <circle cx="10.5" cy="10.5" r="6.5"/>
+          <line x1="15.5" y1="15.5" x2="21" y2="21"/>
+        </svg>
+      </span>
+      <input id="search-input" type="search" placeholder="Search docs..." autocomplete="off"
+             role="combobox" aria-expanded="false" aria-controls="search-results" />
+      <kbd id="search-kbd">&#x2318;K</kbd>
+      <div class="search-results" id="search-results" role="listbox" hidden></div>
     </div>
 
     <div class="nav-right">
@@ -1640,6 +1721,125 @@ document.querySelectorAll('.flow-detail-wrap').forEach(wrap => {
 document.addEventListener('click', () => {
   document.querySelectorAll('.flow-detail-wrap.active').forEach(w => w.classList.remove('active'));
 });
+
+/* ── Search ── */
+(() => {
+  const input = document.getElementById('search-input');
+  const panel = document.getElementById('search-results');
+  const kbd = document.getElementById('search-kbd');
+  if (!input || !panel) return;
+
+  if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) kbd.textContent = 'Ctrl K';
+
+  const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  // Index every heading in the page, with the prose that follows it as the snippet.
+  const index = [];
+  document.querySelectorAll('.main h1, .main h2, .main h3').forEach(h => {
+    const title = h.textContent.replace(/\s+/g, ' ').trim();
+    if (!title) return;
+    let anchor = h.id;
+    if (!anchor) {
+      const section = h.closest('[id]');
+      const isLead = section && section.querySelector('h1, h2, h3') === h;
+      if (isLead) {
+        anchor = section.id;
+      } else {
+        anchor = h.id = slug(title) || 'h-' + index.length;
+      }
+    }
+    let body = '';
+    for (let n = h.nextElementSibling; n && !/^H[1-3]$/.test(n.tagName); n = n.nextElementSibling) {
+      body += ' ' + n.textContent;
+      if (body.length > 600) break;
+    }
+    body = body.replace(/\s+/g, ' ').trim();
+    index.push({ title, anchor, body, haystack: (title + ' ' + body).toLowerCase() });
+  });
+
+  let hits = [];
+  let cursor = -1;
+
+  const escape = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  const highlight = (text, q) => {
+    const i = text.toLowerCase().indexOf(q);
+    if (i < 0) return escape(text);
+    return escape(text.slice(0, i)) + '<mark>' + escape(text.slice(i, i + q.length)) + '</mark>' + escape(text.slice(i + q.length));
+  };
+
+  const snippetFor = (entry, q) => {
+    const i = entry.body.toLowerCase().indexOf(q);
+    if (i < 0) return escape(entry.body.slice(0, 140));
+    const start = Math.max(0, i - 50);
+    const raw = (start ? '\u2026' : '') + entry.body.slice(start, start + 160);
+    return highlight(raw, q);
+  };
+
+  const close = () => {
+    panel.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    cursor = -1;
+  };
+
+  const paint = () => {
+    [...panel.querySelectorAll('.search-hit')].forEach((el, i) => el.classList.toggle('active', i === cursor));
+  };
+
+  const render = q => {
+    if (!q) return close();
+    hits = index
+      .filter(e => e.haystack.includes(q))
+      .sort((a, b) => (b.title.toLowerCase().includes(q) ? 1 : 0) - (a.title.toLowerCase().includes(q) ? 1 : 0))
+      .slice(0, 8);
+    panel.innerHTML = hits.length
+      ? hits.map(e => '<a class="search-hit" role="option" href="#' + e.anchor + '">' +
+          '<div class="search-hit-title">' + highlight(e.title, q) + '</div>' +
+          '<div class="search-hit-snippet">' + snippetFor(e, q) + '</div></a>').join('')
+      : '<div class="search-empty">No matches for \u201c' + escape(q) + '\u201d</div>';
+    panel.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    cursor = hits.length ? 0 : -1;
+    paint();
+  };
+
+  const go = i => {
+    if (!hits[i]) return;
+    location.hash = '#' + hits[i].anchor;
+    input.blur();
+    close();
+  };
+
+  input.addEventListener('input', () => render(input.value.trim().toLowerCase()));
+  input.addEventListener('focus', () => { if (input.value.trim()) render(input.value.trim().toLowerCase()); });
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { input.value = ''; close(); input.blur(); return; }
+    if (panel.hidden || !hits.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); cursor = (cursor + 1) % hits.length; paint(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); cursor = (cursor - 1 + hits.length) % hits.length; paint(); }
+    else if (e.key === 'Enter') { e.preventDefault(); go(cursor < 0 ? 0 : cursor); }
+  });
+
+  panel.addEventListener('mousedown', e => {
+    const hit = e.target.closest('.search-hit');
+    if (!hit) return;
+    e.preventDefault();
+    go([...panel.querySelectorAll('.search-hit')].indexOf(hit));
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.nav-search')) close();
+  });
+
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      input.focus();
+      input.select();
+    }
+  });
+})();
 </script>
 
 </body></html>
