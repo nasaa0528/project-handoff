@@ -26,6 +26,9 @@ importers:
       '@handoff/accounts':
         specifier: workspace:*
         version: link:../../packages/accounts
+      '@handoff/chain':
+        specifier: workspace:*
+        version: link:../../packages/chain
     devDependencies:
       '@handoff/accounts-client':
         specifier: workspace:*
