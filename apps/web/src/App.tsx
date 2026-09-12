@@ -568,6 +568,7 @@ function Ready({ booted, onDisconnect }: { booted: Booted; onDisconnect: () => v
             flow={signFlow}
             now={now}
             drafts={browserDrafts}
+            delivered={entry.delivered}
             onBackToInbox={() => go({ kind: "inbox" })}
           />
         );

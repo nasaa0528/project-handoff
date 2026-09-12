@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeEnvelope, ReviewOrder, SCHEMA_VERSION, type ConsensusRef, type TopicMessage } from "@handoff/schema";
+import { encodeAttestation, encodeEnvelope, ReviewOrder, SCHEMA_VERSION, type ConsensusRef, type TopicMessage } from "@handoff/schema";
 import { InMemoryContentStore } from "../content";
 import { claimBody } from "../orders/claim";
 import { notesToBytes, sha256HexOfBytes } from "../sign/notes";
@@ -124,5 +124,90 @@ describe("TestnetOrderSource", () => {
     expect(tryDecodeReviewOrder(encodeEnvelope(envelope("ord")))?.order_id).toBe("ord");
     expect(tryDecodeReviewOrder(claimBody(envelope("ord")))).toBeNull();
     expect(tryDecodeReviewOrder("nope")).toBeNull();
+  });
+});
+
+/**
+ * The order the expert already signed.
+ *
+ * `fakeChain` above answers every topic with the same array, which was harmless
+ * while nothing read a second topic. These tests need the two apart, so they
+ * bring a chain that honours the topic id.
+ */
+describe("an order this expert has already signed", () => {
+  function twoTopics(orders: readonly TopicMessage[], attestations: readonly TopicMessage[]) {
+    return {
+      async readMessages(topicId: string) {
+        return topicId === ATT_TOPIC ? attestations : orders;
+      },
+      async submitMessage(): Promise<ConsensusRef> {
+        throw new Error("not used");
+      },
+    };
+  }
+
+  async function signedSetup(options: { signer?: string; artifactHashIn?: string } = {}) {
+    const { content, envelope } = await fixtures();
+    const order = envelope("ord_signed");
+    const attestation = encodeAttestation({
+      order_id: "ord_signed",
+      class: "review",
+      verdict: "approve",
+      defects: [],
+      notes_hash: "c".repeat(64),
+      artifact_hash_in: options.artifactHashIn ?? order.artifact_hash_in,
+      cert_tag: order.cert_tag,
+      schema_version: SCHEMA_VERSION,
+    });
+    const chain = twoTopics(
+      [message(1, at(0), "0.0.5", encodeEnvelope(order)), message(2, at(1), EXPERT, claimBody(order))],
+      [{ topicId: ATT_TOPIC, sequenceNumber: 1, consensusTimestamp: at(2), payerAccountId: options.signer ?? EXPERT, contents: attestation }],
+    );
+    const source = new TestnetOrderSource({
+      chain, content, ordersTopicId: TOPIC, attestationsTopicId: ATT_TOPIC,
+      escrowAccountId: ESCROW, expertAccountId: EXPERT,
+      // Well past the 1800s claim window, which is the visit that used to offer
+      // the form again and read the order back as open.
+      now: () => (T0 + 5000) * 1000,
+    });
+    return { source, order };
+  }
+
+  it("reads back as delivered and still held, long after the claim window closed", async () => {
+    const { source } = await signedSetup();
+
+    const [entry] = await source.list();
+
+    expect(entry?.delivered?.yours).toBe(true);
+    expect(entry?.delivered?.verdict).toBe("approve");
+    // A delivered claim never expires. Without the verdict fed back in, this
+    // read "open" and the order looked claimable again.
+    expect(entry?.claim.kind).toBe("yours");
+  });
+
+  it("still opens the document, so the expert can read back what they judged", async () => {
+    const { source } = await signedSetup();
+    const [entry] = await source.list();
+
+    await expect(source.document(entry!.order)).resolves.toBe(DOCUMENT);
+  });
+
+  it("is not delivered when the attestation came from somebody who holds no claim", async () => {
+    const { source } = await signedSetup({ signer: RIVAL });
+
+    const [entry] = await source.list();
+
+    expect(entry?.delivered).toBeNull();
+    // And the claim is left to expire as it would have, rather than pinned open
+    // by a stranger's message.
+    expect(entry?.claim.kind).toBe("open");
+  });
+
+  it("is not delivered when the holder's attestation pins a different artifact", async () => {
+    const { source } = await signedSetup({ artifactHashIn: "e".repeat(64) });
+
+    const [entry] = await source.list();
+
+    expect(entry?.delivered).toBeNull();
   });
 });

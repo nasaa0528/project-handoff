@@ -14,7 +14,8 @@
 
 import { OrderEnvelope, type ConsensusRef, type ReviewOrder, type TopicMessage } from "@handoff/schema";
 import type { ContentStore } from "../content";
-import { claimBody, claimRecordsFor, claimStateFor, TOPIC_READ_LIMIT, type ClaimReader } from "../orders/claim";
+import { claimBody, claimCandidateAccountIdFor, claimRecordsFor, claimStateFor, TOPIC_READ_LIMIT, type ClaimReader } from "../orders/claim";
+import { deliveredStateFor, type DeliveredState } from "../orders/delivery";
 import { titleFromAsk, type ClaimState, type ExpertOrder, type InboxEntry } from "../orders/order";
 import type { OrderSource } from "../orders/source";
 import type { ExpertChain } from "./adapter";
@@ -59,12 +60,40 @@ export class TestnetOrderSource implements OrderSource {
     return Math.floor((this.#deps.now ?? Date.now)() / 1000);
   }
 
-  #state(order: ReviewOrder, messages: readonly TopicMessage[]): ClaimState {
-    return claimStateFor(order, claimRecordsFor(messages, order.order_id), this.#deps.expertAccountId, this.#nowSeconds());
+  /**
+   * Both facts about one order, resolved together and never apart.
+   *
+   * Two passes, and the order matters. The first asks the claims alone who
+   * holds the order; only then can the second tell the holder's own attestation
+   * from a stranger's. The holder's own is then fed back in as `deliveredAt`, so
+   * a signed claim stops expiring — which is what the treaty says and what the
+   * reader used to get wrong.
+   */
+  #facts(
+    order: ReviewOrder,
+    messages: readonly TopicMessage[],
+    attestations: readonly TopicMessage[],
+  ): { readonly claim: ClaimState; readonly delivered: DeliveredState | null } {
+    const records = claimRecordsFor(messages, order.order_id);
+    const now = this.#nowSeconds();
+    const candidate = claimCandidateAccountIdFor(order, records, now);
+    const delivered = deliveredStateFor(order, attestations, candidate, this.#deps.expertAccountId);
+    const claim = claimStateFor(order, records, this.#deps.expertAccountId, now, delivered?.consensusTimestamp);
+    return { claim, delivered };
   }
 
   async #messages(): Promise<readonly TopicMessage[]> {
     return this.#deps.chain.readMessages(this.#deps.ordersTopicId, { limit: TOPIC_READ_LIMIT });
+  }
+
+  /**
+   * The attestations topic, read once per refresh rather than once per order.
+   *
+   * This read did not exist, which is the whole bug: the app had no way to know
+   * a verdict had been published, so it offered the form again.
+   */
+  async #attestations(): Promise<readonly TopicMessage[]> {
+    return this.#deps.chain.readMessages(this.#deps.attestationsTopicId, { limit: TOPIC_READ_LIMIT });
   }
 
   /** The ask, or a sentence saying why not. Only a real ask is cached, or names the order. */
@@ -84,7 +113,8 @@ export class TestnetOrderSource implements OrderSource {
   }
 
   async list(): Promise<readonly InboxEntry[]> {
-    const messages = await this.#messages();
+    // Both topics, concurrently. Two reads per refresh, not two per order.
+    const [messages, attestations] = await Promise.all([this.#messages(), this.#attestations()]);
     const seen = new Set<string>();
     const entries: InboxEntry[] = [];
     for (const message of messages) {
@@ -102,7 +132,7 @@ export class TestnetOrderSource implements OrderSource {
         ask,
         documentWords: null,
       };
-      entries.push({ order, claim: this.#state(envelope, messages) });
+      entries.push({ order, ...this.#facts(envelope, messages, attestations) });
     }
     return entries;
   }
@@ -113,8 +143,15 @@ export class TestnetOrderSource implements OrderSource {
 
   async document(order: ExpertOrder): Promise<string> {
     // The topic decides, not the caller.
-    const state = this.#state(order.envelope, await this.#messages());
-    if (state.kind !== "yours") throw new Error("The document opens after a confirmed claim.");
+    const [messages, attestations] = await Promise.all([this.#messages(), this.#attestations()]);
+    const { claim, delivered } = this.#facts(order.envelope, messages, attestations);
+    // Held by this expert, or already signed by them. The second half is not a
+    // loosening: an expert reopening the order they judged is the ordinary way
+    // to read back what they signed, and refusing it was the reader forgetting
+    // that a delivered claim never expires.
+    if (claim.kind !== "yours" && delivered?.yours !== true) {
+      throw new Error("The document opens after a confirmed claim.");
+    }
     const bytes = await this.#deps.content.get(order.envelope.artifact_hash_in);
     if (bytes === null) throw new Error("The document is not in the content store.");
     return decoder.decode(bytes);

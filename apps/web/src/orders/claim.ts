@@ -62,14 +62,72 @@ export function claimRecordsFor(messages: readonly TopicMessage[], orderId: stri
   return records.sort((a, b) => compareConsensusTimestamps(a.consensusTimestamp, b.consensusTimestamp));
 }
 
-/** What the treaty's rule says for one order, in the words the screens use. */
+/**
+ * Whose attestation is allowed to speak for this order, or null when nobody's
+ * is.
+ *
+ * The first of two passes, resolved on the claims alone with no `deliveredAt`.
+ * Its answer decides whose message the second pass will accept — which is why
+ * it cannot simply be "the current holder". A claim whose window has run out by
+ * the wall clock resolves to `claim_timeout`, and asking only for a *live*
+ * holder there returns nobody, so the expert's own verdict is never looked up
+ * and the order reads as open again. That is the visit this fixes: sign, come
+ * back an hour later, and the form is offered a second time.
+ *
+ * So the expired claimant counts too. `resolveClaims` puts the *reopener* in
+ * `expired` once one exists, so this never revives a claimant that a reopen has
+ * already passed over: it names whoever the claim rule last had standing on the
+ * order, and only their own matching attestation can make it final.
+ *
+ * Separate from `claimStateFor` because `ClaimState` deliberately carries no
+ * account id — the screens only ever needed "is it mine" — while
+ * `deliveredStateFor` needs the id itself, to tell that account's message from a
+ * stranger's on a topic with no submit key.
+ */
+export function claimCandidateAccountIdFor(
+  order: OrderEnvelope,
+  records: readonly ClaimRecord[],
+  nowEpochSeconds: number,
+): string | null {
+  const resolution = resolveClaims({ order, claims: records, nowEpochSeconds });
+  switch (resolution.state) {
+    case "unclaimed":
+      return null;
+    case "claimed":
+      return resolution.active.claimantAccountId;
+    case "claim_timeout":
+      return resolution.expired.claimantAccountId;
+  }
+}
+
+/**
+ * What the treaty's rule says for one order, in the words the screens use.
+ *
+ * `deliveredAt` is the consensus timestamp of the holder's own matching
+ * attestation, and passing it is what keeps a signed claim from expiring under
+ * the reader's feet — `claim.ts` in the schema package: "A delivered claim never
+ * expires." Without it an expert who signed and came back later found the order
+ * reading as open again, and `document()` refusing to reopen the very document
+ * they had just judged.
+ *
+ * Only ever the holder's own, and only a matching one. The caller gets it from
+ * `deliveredStateFor`, which enforces both; a stranger's message on the
+ * submit-keyless attestations topic must not be able to pin anybody's claim
+ * open.
+ */
 export function claimStateFor(
   order: OrderEnvelope,
   records: readonly ClaimRecord[],
   expertAccountId: string,
   nowEpochSeconds: number,
+  deliveredAt?: string,
 ): ClaimState {
-  const resolution = resolveClaims({ order, claims: records, nowEpochSeconds });
+  const resolution = resolveClaims({
+    order,
+    claims: records,
+    nowEpochSeconds,
+    ...(deliveredAt === undefined ? {} : { deliveredAt }),
+  });
   switch (resolution.state) {
     case "unclaimed":
       return { kind: "open" };

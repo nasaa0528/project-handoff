@@ -8,6 +8,7 @@
  */
 
 import type { OrderForSigning } from "../sign/sign";
+import type { DeliveredState } from "./delivery";
 
 export interface ExpertOrder extends OrderForSigning {
   /**
@@ -54,6 +55,17 @@ export type ClaimState =
 export interface InboxEntry {
   readonly order: ExpertOrder;
   readonly claim: ClaimState;
+  /**
+   * The published verdict, or null while none is.
+   *
+   * A second axis beside `claim`, not a variant of it: an order can be both
+   * held and signed, and the treaty models delivery the same way — as an input
+   * to the claim rule rather than a state of it. `delivered.yours` is what
+   * closes the sign form, so a signed order reopens as signed instead of
+   * offering to sign it again. See `delivery.ts` for the message that made this
+   * necessary.
+   */
+  readonly delivered: DeliveredState | null;
 }
 
 export function countWords(text: string): number {

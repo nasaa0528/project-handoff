@@ -63,19 +63,23 @@ export function Navbar({
   disconnectHeld?: boolean | undefined;
 }) {
   const verified = identity.credentials.length > 0;
-  const [asked, setAsked] = useState(false);
+  const [opens, setOpens] = useState(0);
   const [account, setAccount] = useState<AccountLookup | null>(null);
 
-  // One read, the first time the menu opens. The account id is public and
-  // the read needs no key.
+  // One read **every** time the menu opens, not once per session. It used to be
+  // a boolean that latched true, so the balance was whatever it had been the
+  // first time the expert looked — and this app's whole point is watching a
+  // payout arrive, so it was stale exactly when it mattered. Opening the menu is
+  // the expert asking "what is my balance now"; it gets answered now. The
+  // account id is public and the read needs no key.
   useEffect(() => {
-    if (!asked) return;
+    if (opens === 0) return;
     const controller = new AbortController();
     void lookupAccount(identity.accountId, { fetch: (...args) => fetch(...args), signal: controller.signal }).then((found) => {
       if (!controller.signal.aborted) setAccount(found);
     });
     return () => controller.abort();
-  }, [asked, identity.accountId]);
+  }, [opens, identity.accountId]);
 
   const balance = account !== null && account.status === "found" ? account.balanceTinybars : null;
 
@@ -117,7 +121,7 @@ export function Navbar({
           <ArrowUpRight className="size-3.5 text-faint" aria-hidden />
         </a>
 
-        <DropdownMenu onOpenChange={(open) => open && setAsked(true)}>
+        <DropdownMenu onOpenChange={(open) => open && setOpens((n) => n + 1)}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
