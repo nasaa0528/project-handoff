@@ -11,6 +11,7 @@ import { MOCK_ESCROW_ACCOUNT_ID, MockChainAdapter, type ChainAdapter } from "@ha
 import {
   assertOperatorKeyMatches,
   createHederaChainAdapter,
+  findPayout,
   loadChainEnv,
   type ChainEnv,
 } from "@handoff/chain";
@@ -105,6 +106,21 @@ async function main(): Promise<void> {
       // own constant otherwise. Two sources for one escrow id is how a settle
       // ends up debiting an account the fund lock never credited.
       escrowAccountId: mode === "testnet" ? required("HANDOFF_ESCROW_ACCOUNT_ID") : MOCK_ESCROW_ACCOUNT_ID,
+      // Wired from the same `env` the adapter is built from, so the settle path
+      // and the payout it guards read one mirror node rather than two.
+      //
+      // Mock mode answers null and means it: there is no mirror to ask, and
+      // MockChainAdapter's in-memory record is the whole guard a mock needs.
+      // The cost is that a mock settle cannot report "already paid" early — it
+      // reports it the way it always did, out of `alreadyExisted`.
+      findPayout:
+        env === undefined
+          ? async () => null
+          : async (orderId: string) =>
+              findPayout(env.mirrorNodeUrl, {
+                escrowAccountId: required("HANDOFF_ESCROW_ACCOUNT_ID"),
+                orderId,
+              }),
       certTags: config.certTags,
     },
     { log: (line) => console.log(line) },

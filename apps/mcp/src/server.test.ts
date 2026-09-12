@@ -70,6 +70,9 @@ function harness(options: { verify?: unknown; settle?: unknown } = {}) {
     ordersTopicId: "0.0.orders",
     attestationsTopicId: "0.0.9002",
     escrowAccountId: MOCK_ESCROW_ACCOUNT_ID,
+    // Mock chain, so there is no mirror to ask: the in-memory record is
+    // the guard, as it is in mock mode in index.ts.
+    findPayout: async () => null,
     certTags: [{ code: "cpa-us", label: "Licensed reviewer" }],
   };
   return { deps, paths, content };
