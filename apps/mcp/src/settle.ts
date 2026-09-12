@@ -43,12 +43,30 @@ import {
   type ChainAdapter,
   type OrderEnvelope,
 } from "@handoff/schema";
+import type { PayoutSighting } from "@handoff/chain";
 import { readOrderFacts, type StatusDeps } from "./status.js";
 
 export interface SettleDeps extends StatusDeps {
   readonly chain: ChainAdapter;
   /** The one shared escrow. Configuration to this process, never something it invents. */
   readonly escrowAccountId: string;
+  /**
+   * "Has this order already been paid?", asked of the mirror node.
+   *
+   * Required rather than optional on purpose. Without it a settle call on an
+   * order that is already paid falls through to the holder gate, and if a
+   * reopen has moved the holder it refuses with "no attestation from that
+   * account yet, the mirror node lags" — a retryable answer to something that
+   * can never change, about an order whose money already moved. Measured on
+   * testnet 2026-09-12; see the settle decision's open questions. An optional
+   * dependency is a wire somebody forgets, and forgetting it here reinstates
+   * that answer on a money path.
+   *
+   * Returns null when the escrow has no payout carrying this order's memo.
+   * Injected rather than imported so this module keeps its single dependency on
+   * the chain package a type, and so a mock chain can answer without a mirror.
+   */
+  readonly findPayout: (orderId: string) => Promise<PayoutSighting | null>;
 }
 
 /**
@@ -101,6 +119,17 @@ export interface SettlementResult {
    * caller as "we checked".
    */
   readonly alreadyRecorded: boolean;
+  /**
+   * True when the mirror node already showed this payout before this call did
+   * anything.
+   *
+   * This is the one a caller should read, and the opposite of
+   * `alreadyRecorded` in what it can be trusted for: it is the network's
+   * answer, so it survives a restart. A retry of a settle that already paid is
+   * a success with this set, never a refusal — the escrow moved, and saying
+   * "not ready, try again" about it is wrong in both halves.
+   */
+  readonly settledBefore: boolean;
 }
 
 /**
@@ -169,6 +198,42 @@ function epochSecondsToUtc(seconds: number): string {
  * flattened "could not settle".
  */
 export async function settleOrder(orderId: string, deps: SettleDeps): Promise<SettlementResult> {
+  // **Asked first, before the topics are read at all.** A paid order is
+  // finished, and every question after this one is about who *should* be paid —
+  // a question whose answer can drift, because `resolveClaims` recomputes the
+  // holder from the wall clock and a later claim can take it. When it drifts on
+  // an order that already paid, the holder gate below refuses with a retryable
+  // "the mirror node lags" about money that has already moved. So the network is
+  // asked while the answer is still unambiguous.
+  //
+  // It also means a settled order needs no topic scan and cannot be blocked by
+  // "not visible on the orders topic yet".
+  //
+  // The memo is now read twice per settle, and both reads are load-bearing:
+  // this one answers the caller, and the adapter's own one inside
+  // `signSchedule` guards the irreversible half after the payee is known. This
+  // one never composes a signature, so it cannot stand in for that.
+  const paid = await deps.findPayout(orderId);
+  if (paid !== null && paid.payeeAccountId !== null) {
+    return {
+      orderId,
+      state: "SETTLED",
+      payoutTransactionId: paid.transactionId,
+      // The escrow's own debit, not the envelope's price. They agree, and when
+      // they do not it is the transfer that happened.
+      payeeAccountId: paid.payeeAccountId,
+      amountTinybars: paid.amountTinybars,
+      // Nothing was read out of this process's memory to get here.
+      alreadyRecorded: false,
+      settledBefore: true,
+    };
+  }
+  // A sighting whose payee no single leg identifies is deliberately not
+  // short-circuited. The memo says a payout happened; it does not say where it
+  // went, and naming a payee this call cannot see is worse than carrying on.
+  // The adapter's check runs later with the holder in hand and refuses loudly
+  // if that transfer credited somebody else.
+
   const facts = await readOrderFacts(orderId, deps);
 
   const posted = facts.posted;
@@ -303,6 +368,7 @@ export async function settleOrder(orderId: string, deps: SettleDeps): Promise<Se
     payeeAccountId: held.claimantAccountId,
     amountTinybars,
     alreadyRecorded: schedule.alreadyExisted,
+    settledBefore: false,
   };
 }
 

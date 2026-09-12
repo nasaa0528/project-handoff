@@ -304,8 +304,17 @@ export async function readOrderFacts(orderId: string, deps: StatusDeps): Promise
    * because only it knows which claim won. One case is still wrong here: if
    * the first claimant delivers late *and* somebody has already claimed the
    * reopen, the treaty says the delivered first claim wins and this gives it
-   * to the reopener. Narrow, and unreachable while reopen is unwired, but it
-   * belongs in `packages/schema/src/claim.ts`.
+   * to the reopener. It belongs in `packages/schema/src/claim.ts`.
+   *
+   * This once said "unreachable while reopen is unwired". Reopen is wired:
+   * measured on testnet 2026-09-12, a second account claimed the reopen on
+   * order `ord_625a742e59174b5a9f4d6f1d7b42bd4a` and took the order from a
+   * claimant who had delivered 12.7 s into an 1800 s window. So the wider case
+   * bites too — a *timely* delivery is discarded once anybody claims the
+   * reopen, because `candidate` here is the reopener and its `reopened` flag
+   * short-circuits before the first claimant's own attestation is looked up.
+   * The settle path no longer refuses such an order when it was already paid,
+   * but that is containment, not the fix.
    */
   const nowEpochSeconds = deps.nowEpochSeconds ?? Math.floor(Date.now() / 1000);
   const holder =

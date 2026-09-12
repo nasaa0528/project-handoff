@@ -41,6 +41,9 @@ const deps: ServerDeps = {
   ordersTopicId: "0.0.orders",
   attestationsTopicId: "0.0.attestations",
   escrowAccountId: MOCK_ESCROW_ACCOUNT_ID,
+  // Mock chain, so there is no mirror to ask: the in-memory record is
+  // the guard, as it is in mock mode in index.ts.
+  findPayout: async () => null,
   certTags: [{ code: "cpa-us", label: "Licensed reviewer" }],
 };
 

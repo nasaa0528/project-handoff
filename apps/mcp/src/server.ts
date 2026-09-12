@@ -38,6 +38,7 @@ import {
 } from "./x402/gate.js";
 import type { Facilitator } from "./x402/facilitator.js";
 import type { CertTagOption } from "./config.js";
+import type { PayoutSighting } from "@handoff/chain";
 import { SettleError, settleOrder } from "./settle.js";
 import { readOrderStatus } from "./status.js";
 import { unknownTagReply } from "./replies.js";
@@ -77,6 +78,14 @@ export interface ServerDeps {
   readonly attestationsTopicId: string;
   /** The one shared escrow. Needed to settle; never invented by this process. */
   readonly escrowAccountId: string;
+  /**
+   * "Has this order already been paid?", answered by the mirror node.
+   *
+   * Passed straight through to `settleOrder`, which asks it before anything
+   * else so a retry of a settle that already paid is a 200 rather than a
+   * retryable 409. See `SettleDeps.findPayout`.
+   */
+  readonly findPayout: (orderId: string) => Promise<PayoutSighting | null>;
   readonly certTags: readonly CertTagOption[];
   /** Injectable so tests are deterministic. Minted at the 402. */
   readonly newOrderId?: () => string;
@@ -322,6 +331,7 @@ async function route(request: HttpRequest, deps: ServerDeps): Promise<HttpRespon
         ordersTopicId: deps.ordersTopicId,
         attestationsTopicId: deps.attestationsTopicId,
         escrowAccountId: deps.escrowAccountId,
+        findPayout: deps.findPayout,
       });
       return { status: 200, headers: json, body: settlement };
     } catch (error) {
