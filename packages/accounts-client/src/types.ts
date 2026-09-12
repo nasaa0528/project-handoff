@@ -22,12 +22,31 @@ export interface AccountProfile {
   /** Absent, not null, when the person has no surname. */
   readonly lastName?: string;
   readonly emailVerified: boolean;
+  /**
+   * Who holds this account's Hedera signing key.
+   *
+   * `"self"` is an account the person brought and signs with themselves.
+   * `"platform"` is one the platform created for them and whose key it stores,
+   * encrypted under their password — custody, granted narrowly by
+   * `docs/decisions/2026-09-12-platform-creates-and-stores-expert-key.md` on the
+   * condition it is said out loud. A UI showing an expert's account should say
+   * which, rather than leaving the judge to ask.
+   */
+  readonly keyCustody: "platform" | "self";
   /** ISO 8601, UTC. */
   readonly createdAt: string;
 }
 
 export interface RegistrationInput {
-  readonly hederaAccountId: string;
+  /**
+   * Omit to have the platform create a testnet account and hold its key
+   * encrypted under `password`. Supply one to register an account you already
+   * own, in which case no key ever reaches the server.
+   *
+   * A server with provisioning switched off refuses the omitted form with
+   * `validation_failed` on `hederaAccountId`.
+   */
+  readonly hederaAccountId?: string;
   readonly email: string;
   readonly username: string;
   readonly firstName: string;
@@ -37,6 +56,14 @@ export interface RegistrationInput {
 
 export interface RegistrationResponse {
   readonly account: AccountProfile;
+  /**
+   * Present only when the platform created the account. The transaction id is
+   * the one that made it — look it up on a mirror node or Hashscan.
+   *
+   * The private key is deliberately not here and never will be: it is encrypted
+   * under the registering password before the row is written.
+   */
+  readonly accountCreated?: { readonly transactionId: string };
   readonly verification: {
     /**
      * Whether the code reached the mail transport.

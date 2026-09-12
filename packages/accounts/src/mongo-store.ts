@@ -37,6 +37,8 @@ interface AccountDoc {
   firstName: string;
   lastName?: string;
   passwordHash: string;
+  /** Present only for accounts the platform created. See key-vault.ts. */
+  encryptedPrivateKey?: string;
   emailVerifiedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -68,6 +70,7 @@ function toAccount(doc: AccountDoc): Account {
     firstName: doc.firstName,
     ...(doc.lastName === undefined ? {} : { lastName: doc.lastName }),
     passwordHash: doc.passwordHash,
+    ...(doc.encryptedPrivateKey === undefined ? {} : { encryptedPrivateKey: doc.encryptedPrivateKey }),
     emailVerifiedAt: doc.emailVerifiedAt,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -84,6 +87,9 @@ function toDoc(account: Account): AccountDoc {
     firstName: account.firstName,
     ...(account.lastName === undefined ? {} : { lastName: account.lastName }),
     passwordHash: account.passwordHash,
+    ...(account.encryptedPrivateKey === undefined
+      ? {}
+      : { encryptedPrivateKey: account.encryptedPrivateKey }),
     emailVerifiedAt: account.emailVerifiedAt,
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,

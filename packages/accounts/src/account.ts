@@ -10,12 +10,14 @@
  * Two consequences worth saying out loud, because they are the reason this package
  * is not a custody system:
  *
- * - **This package never creates a Hedera account and never holds a key.** The
- *   account arrives already existing, made by its owner at the portal or in a
- *   wallet. A platform that made accounts for people would be the "custodial web2
- *   wrap" that `CLAUDE.md` puts in Tier 3, and on the expert side it would break
- *   the product's central claim — an attestation signed by a platform-held key
- *   proves the platform pressed a button, not that a human reviewed anything.
+ * - **A registration may now bring its own account or ask for one.** Bringing one
+ *   is the original path and holds no key. Asking for one is custody, granted
+ *   narrowly by `docs/decisions/2026-09-12-platform-creates-and-stores-expert-key.md`
+ *   after this file first said it would never happen, and the honesty that
+ *   decision is conditional on lives on `PublicProfile.keyCustody` and in the
+ *   Known limits section. The cost it accepts is real: an attestation signed by a
+ *   platform-held key proves the platform pressed a button, not that a human
+ *   reviewed anything. Production is client-side signing.
  * - **A row here is a claim, not a proof.** Registering `0.0.5005` does not
  *   demonstrate control of `0.0.5005`; see `proof-of-control` in this package's
  *   CLAUDE.md for the seam where that belongs. Nothing that spends money may treat
@@ -149,7 +151,16 @@ export const LastName = PersonName.optional();
  */
 export const RegistrationRequest = z
   .object({
-    hederaAccountId: HederaAccountId,
+    /**
+     * Optional since `2026-09-12-platform-creates-and-stores-expert-key.md`.
+     *
+     * Present means "I already own this account" and is the original, non-custodial
+     * path: nothing is created and no key is held. Absent means "make me one",
+     * and the platform creates the account and stores the key encrypted under
+     * this password. Which path ran is visible afterwards on the profile, as
+     * `keyCustody`, because a user should be able to see which one they are on.
+     */
+    hederaAccountId: HederaAccountId.optional(),
     email: Email,
     username: Username,
     firstName: FirstName,
@@ -198,6 +209,15 @@ export interface Account {
   readonly firstName: string;
   readonly lastName?: string | undefined;
   readonly passwordHash: string;
+  /**
+   * The owner's Hedera private key, encrypted under their password — set only
+   * when the platform created the account for them. Absent means the account
+   * arrived already existing and the platform holds no key for it.
+   *
+   * Never leaves the process: `publicProfile` does not carry it, and there is a
+   * test that fails if anyone adds it.
+   */
+  readonly encryptedPrivateKey?: string | undefined;
   /** Null until a one-time code from that mailbox has been confirmed. */
   readonly emailVerifiedAt: Date | null;
   readonly createdAt: Date;
@@ -212,6 +232,15 @@ export interface PublicProfile {
   readonly firstName: string;
   readonly lastName?: string | undefined;
   readonly emailVerified: boolean;
+  /**
+   * Whether the platform holds this account's signing key.
+   *
+   * On the profile rather than inferred by the client, because
+   * `2026-09-12-platform-creates-and-stores-expert-key.md` accepts custody on the
+   * condition that it is said out loud. A UI that cannot tell the two kinds of
+   * account apart cannot say it.
+   */
+  readonly keyCustody: "platform" | "self";
   readonly createdAt: string;
 }
 
@@ -231,6 +260,7 @@ export function publicProfile(account: Account): PublicProfile {
     firstName: account.firstName,
     ...(account.lastName === undefined ? {} : { lastName: account.lastName }),
     emailVerified: account.emailVerifiedAt !== null,
+    keyCustody: account.encryptedPrivateKey === undefined ? "self" : "platform",
     createdAt: account.createdAt.toISOString(),
   };
 }

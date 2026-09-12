@@ -1,5 +1,6 @@
 export * from "./account.js";
 export * from "./hedera-account.js";
+export * from "./key-vault.js";
 export * from "./memory-store.js";
 export * from "./mongo-store.js";
 export * from "./password.js";

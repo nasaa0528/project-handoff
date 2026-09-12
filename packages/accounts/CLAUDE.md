@@ -10,25 +10,53 @@ database always builds. Root `CLAUDE.md` and
 say identity in this design *is* the Hedera account; this package is that sentence
 with a profile attached.
 
-## What this package must never do
+## Custody — read this before anything else
 
-These are the line between a profile store and the Tier 3 "custodial web2 wrap".
+The first two rules below used to read "never create a Hedera account" and "never
+hold a private key". **Both were overridden on 2026-09-12** by
+`docs/decisions/2026-09-12-platform-creates-and-stores-expert-key.md`, P4's scope
+exception, so that a judge can register and sign without first creating, funding
+and exporting an account. Registration now has two paths:
 
-- **Never create a Hedera account.** The account arrives already existing, made by
-  its owner at the portal or in a wallet.
-- **Never hold a private key**, and never sign anything. Nothing here imports the
-  Hedera SDK; the one ledger interaction is a mirror-node GET that asks whether an
-  account exists.
+| The caller sends | What happens | `keyCustody` |
+|---|---|---|
+| `hederaAccountId` | Nothing is created, no key is held. The original behaviour | `self` |
+| no `hederaAccountId` | The platform creates a testnet account and stores its key, encrypted under the registering password | `platform` |
+
+The cost that decision accepts is real and is owed out loud: **an attestation
+signed by a platform-held key proves the platform pressed a button, not that a
+certified human reviewed anything.** That is why `PublicProfile` carries
+`keyCustody` — a UI that cannot tell the two apart cannot say which it is showing.
+Production is client-side signing; this is a demo-scoped exception with an
+explicit expiry.
+
+Three things keep the custody as narrow as it can be, and none of them are
+optional:
+
+- **The key is encrypted under the user's password**, which is never stored, plus
+  the server-side pepper, which is never in the database. A dump is scrypt work
+  per account, not a pile of signing keys. See `key-vault.ts`.
+- **Provisioning is injected, never imported.** The capability is absent from a
+  deployment that does not pass `provisionHederaAccount`, rather than present and
+  declined.
+- **The plaintext key lives from the provisioner returning to
+  `encryptPrivateKey`.** It is not logged, not returned and not stored.
+
+## What this package must still never do
+
+- **Never import the Hedera SDK.** That is the layout rule in root `CLAUDE.md` and
+  it survived the exception: account creation is a function this package is handed,
+  implemented in `packages/chain`. The one ledger interaction of its own is a
+  mirror-node GET.
 - **Never let a row here authorise money.** A registration is a *claim* to an
   account, not proof of control — see below. The cert gate is the HCS registry
   topic (NAS-27), which is on-chain and auditable.
 - **Never store a secret in plaintext.** Passwords are scrypt; email codes and
-  session tokens are stored as keyed HMAC fingerprints and never as themselves.
-
-The second rule is the load-bearing one. If the platform held an expert's key, the
-product's central claim would stop being true: an attestation signed by a
-platform-held key proves the platform pressed a button, not that a certified human
-reviewed anything.
+  session tokens are keyed HMAC fingerprints; the Hedera key is AES-256-GCM under
+  the password. Nothing is stored as itself.
+- **Never put the key, or its ciphertext, on anything a client sees.**
+  `publicProfile` is the one place an account becomes visible, and there are tests
+  in three files that fail if the blob appears in a response.
 
 ## Proof of control — the seam, and what is honestly missing
 
@@ -58,6 +86,7 @@ If a profile ever needs to appear inside an envelope, the type belongs in
 |---|---|
 | `account.ts` | The schemas, normalisation, and `publicProfile` — the one place an account becomes something a client may see |
 | `password.ts` | scrypt hashing, the acceptability rules, and the constant-time compare |
+| `key-vault.ts` | AES-256-GCM over the Hedera private key, keyed on the password. Read its header before touching it |
 | `secrets.ts` | Six-digit codes, session tokens, and the peppered HMAC both are stored as |
 | `store.ts` | The `AccountStore` interface and its errors |
 | `memory-store.ts` | In-memory implementation. Tests only — never a demo |

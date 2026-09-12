@@ -38,6 +38,7 @@ import {
   SESSION_TTL_SECONDS,
   type CodePepper,
 } from "./secrets.js";
+import { encryptPrivateKey } from "./key-vault.js";
 import { DuplicateAccountError, type AccountStore, type ProfilePatch } from "./store.js";
 
 /**
@@ -106,6 +107,27 @@ export const consoleEmailSender: EmailCodeSender = async (message) => {
   );
 };
 
+/**
+ * Creates a Hedera account for someone who does not have one, and hands back the
+ * key so it can be encrypted.
+ *
+ * A function rather than an import, for the same reason `AccountExistenceCheck` is
+ * one: this package must not import the Hedera SDK (the layout rule in root
+ * `CLAUDE.md`). `apps/accounts-api` injects the real implementation from
+ * `packages/chain`; tests inject a fake.
+ *
+ * The plaintext key is alive for exactly as long as it takes `register` to encrypt
+ * it. Nothing holds a reference afterwards and nothing logs it.
+ */
+export interface ProvisionedAccount {
+  readonly hederaAccountId: string;
+  /** The DER string form. Encrypted immediately; never stored as it arrives. */
+  readonly privateKey: string;
+  readonly transactionId: string;
+}
+
+export type HederaAccountProvisioner = () => Promise<ProvisionedAccount>;
+
 export interface AccountServiceConfig {
   readonly store: AccountStore;
   /** From configuration. See `codePepper` for why a bare string is not accepted. */
@@ -113,6 +135,13 @@ export interface AccountServiceConfig {
   readonly sendEmailCode: EmailCodeSender;
   /** Defaults to a checker that accepts anything, for tests. */
   readonly checkHederaAccount?: AccountExistenceCheck;
+  /**
+   * Absent means registration requires the caller to bring their own account id —
+   * the non-custodial behaviour this package had before
+   * `2026-09-12-platform-creates-and-stores-expert-key.md`. A deployment that does
+   * not inject this cannot be talked into creating accounts or holding keys.
+   */
+  readonly provisionHederaAccount?: HederaAccountProvisioner;
   /**
    * Whether an unverified email may sign in. Defaults to **false** — verification
    * that does not gate anything is theatre.
@@ -123,6 +152,14 @@ export interface AccountServiceConfig {
 
 export interface RegistrationResult {
   readonly profile: PublicProfile;
+  /**
+   * The AccountCreate transaction id, when the platform made the account.
+   *
+   * Threaded through rather than swallowed, per root `CLAUDE.md`: every Hedera
+   * call surfaces its transaction id. Absent when the caller brought their own
+   * account, because then no transaction happened.
+   */
+  readonly accountCreatedTx?: string;
   /**
    * Whether the code actually reached the transport.
    *
@@ -146,6 +183,7 @@ export class AccountService {
   readonly #pepper: CodePepper;
   readonly #sendEmailCode: EmailCodeSender;
   readonly #checkHederaAccount: AccountExistenceCheck;
+  readonly #provisionHederaAccount: HederaAccountProvisioner | undefined;
   readonly #allowUnverifiedSignIn: boolean;
   readonly #now: () => Date;
 
@@ -154,6 +192,7 @@ export class AccountService {
     this.#pepper = config.pepper;
     this.#sendEmailCode = config.sendEmailCode;
     this.#checkHederaAccount = config.checkHederaAccount ?? skipAccountCheck;
+    this.#provisionHederaAccount = config.provisionHederaAccount;
     this.#allowUnverifiedSignIn = config.allowUnverifiedSignIn ?? false;
     this.#now = config.now ?? (() => new Date());
   }
@@ -188,11 +227,23 @@ export class AccountService {
 
     // Before anything is written. An id that is not on the ledger cannot ever be
     // the identity it claims to be, and `unknown` (mirror unreachable) is allowed
-    // through deliberately — see hedera-account.ts.
-    if ((await this.#checkHederaAccount(request.hederaAccountId)) === "missing") {
+    // through deliberately — see hedera-account.ts. Only for an account the caller
+    // brought: one this process is about to create does not need checking.
+    if (
+      request.hederaAccountId !== undefined &&
+      (await this.#checkHederaAccount(request.hederaAccountId)) === "missing"
+    ) {
       throw new AccountError(
         "unknown_hedera_account",
         `no account ${request.hederaAccountId} on testnet — check the id, or create one at the portal first`,
+        "hederaAccountId",
+      );
+    }
+
+    if (request.hederaAccountId === undefined && this.#provisionHederaAccount === undefined) {
+      throw new AccountError(
+        "validation_failed",
+        "a Hedera account id is required — this deployment does not create accounts",
         "hederaAccountId",
       );
     }
@@ -204,11 +255,41 @@ export class AccountService {
     // 16MiB on a KDF for a registration that cannot land. The unique indexes are
     // still the guard that matters — two simultaneous registrations both pass this
     // check and one of them loses at the insert, which `createAccount` handles.
+    //
+    // On the provisioning path this ordering is load-bearing rather than merely
+    // cheap: creating the Hedera account spends operator HBAR and cannot be undone,
+    // so a registration that is going to fail on a taken email must fail *before*
+    // the ledger is touched.
     await this.#assertAvailable(request.hederaAccountId, emailNormalized, usernameNormalized);
+
+    const provision = this.#provisionHederaAccount;
+    const provisioned =
+      request.hederaAccountId === undefined && provision !== undefined ? await provision() : undefined;
+
+    const hederaAccountId = provisioned?.hederaAccountId ?? request.hederaAccountId;
+    if (hederaAccountId === undefined) {
+      // Unreachable: the guard above returns when there is neither an id nor a
+      // provisioner. Stated rather than asserted away, because a `!` here would be
+      // the one place a refactor could silently create an account with no identity.
+      throw new AccountError("validation_failed", "a Hedera account id is required", "hederaAccountId");
+    }
+
+    // The plaintext key lives exactly this long. `provisioned.privateKey` is not
+    // logged, not returned and not stored — the blob below is what is kept, and
+    // it needs this password to open.
+    const encryptedPrivateKey =
+      provisioned === undefined
+        ? undefined
+        : await encryptPrivateKey(
+            provisioned.privateKey,
+            request.password,
+            hederaAccountId,
+            this.#pepper,
+          );
 
     const now = this.#now();
     const account: Account = {
-      hederaAccountId: request.hederaAccountId,
+      hederaAccountId,
       email: request.email.trim(),
       emailNormalized,
       username: request.username.trim(),
@@ -216,6 +297,7 @@ export class AccountService {
       firstName: request.firstName,
       ...(request.lastName === undefined ? {} : { lastName: request.lastName }),
       passwordHash: await hashPassword(request.password),
+      ...(encryptedPrivateKey === undefined ? {} : { encryptedPrivateKey }),
       emailVerifiedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -224,6 +306,15 @@ export class AccountService {
     try {
       await this.#store.createAccount(account);
     } catch (error) {
+      // The row lost the race, but the ledger already has the account and the
+      // operator already paid for it. Nothing can un-create it, so the id goes to
+      // the log rather than into a silence nobody can reconcile later.
+      if (provisioned !== undefined) {
+        console.error(
+          `orphaned Hedera account ${provisioned.hederaAccountId} (tx ${provisioned.transactionId}): ` +
+            `created for a registration that then failed to store`,
+        );
+      }
       if (error instanceof DuplicateAccountError) {
         throw new AccountError("account_exists", error.message, error.field);
       }
@@ -234,6 +325,7 @@ export class AccountService {
 
     return {
       profile: publicProfile(account),
+      ...(provisioned === undefined ? {} : { accountCreatedTx: provisioned.transactionId }),
       verificationSent: issued.sent,
       verificationExpiresAt: issued.expiresAt.toISOString(),
     };
@@ -401,13 +493,13 @@ export class AccountService {
   }
 
   async #assertAvailable(
-    hederaAccountId: string,
+    hederaAccountId: string | undefined,
     emailNormalized: string,
     usernameNormalized: string,
   ): Promise<void> {
     // Same order as the unique indexes report collisions, so the pre-check and
     // the index never disagree about which field to blame.
-    if ((await this.#store.findByAccountId(hederaAccountId)) !== null) {
+    if (hederaAccountId !== undefined && (await this.#store.findByAccountId(hederaAccountId)) !== null) {
       throw new AccountError(
         "account_exists",
         "that Hedera account is already registered — sign in instead",

@@ -13,7 +13,7 @@ money, and nothing in `apps/mcp` needs this to run.
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | GET | `/health` | — | |
-| POST | `/v1/accounts` | — | 201. Never returns the code |
+| POST | `/v1/accounts` | — | 201. Never returns the code, and never the private key |
 | POST | `/v1/accounts/verification/request` | — | 202, resend |
 | POST | `/v1/accounts/verification/confirm` | — | 200 |
 | POST | `/v1/sessions` | — | 200 with a bearer token |
@@ -50,6 +50,25 @@ Every body is `{ "error": { "code", "message", "field"? } }`. Clients branch on
 is not any more, which is a different thing for a client to show than "that code is
 wrong".
 
+## Creating accounts for people
+
+Off unless `HANDOFF_ACCOUNTS_PROVISION=true`. When it is on, a registration that
+omits `hederaAccountId` makes this process create a testnet account from the
+operator and store its key encrypted under the registering password — custody,
+granted by `docs/decisions/2026-09-12-platform-creates-and-stores-expert-key.md`
+and conditional on it being said out loud. The process shouts about it on boot for
+the same reason it shouts about the in-memory store.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `HANDOFF_ACCOUNTS_PROVISION` | `false` | `true` lets this process create accounts and hold keys |
+| `HANDOFF_ACCOUNTS_NEW_BALANCE_HBAR` | `1` | What each created account is funded with |
+| `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY` | — | The operator that pays. Read via `loadChainEnv`, which refuses any network but testnet |
+
+The operator key is vault-only (hard rule 2) and this is the only part of the API
+that touches it. With provisioning off, the service is constructed with no
+provisioner at all, so the capability is absent rather than merely unused.
+
 ## Things that will bite if ignored
 
 - **`handle()` is a pure function of a request.** `http.ts` only moves bytes. Keep
@@ -70,6 +89,11 @@ wrong".
 - **The rate limiter is per-process.** Two instances behind a balancer have two
   budgets and the effective limit doubles. Fine for this build's single process;
   the production answer is a shared counter.
+- **The response must never carry the private key.** On the provisioning path the
+  client is told the account id and the AccountCreate transaction id, and nothing
+  else about the key. `publicProfile` enforces it rather than the handler, and
+  `routes.test.ts` asserts the serialised body contains neither the key nor its
+  ciphertext.
 - **500s never carry the error text.** An internal message can name a collection or
   a connection string. It is logged, not returned.
 - **`OPTIONS` is answered for any path.** A browser sends the preflight before it

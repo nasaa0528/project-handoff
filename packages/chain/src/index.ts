@@ -14,3 +14,4 @@ export * from "./pending-payout.js";
 export * from "./direct-payout.js";
 export * from "./payout-memo.js";
 export * from "./payout-lookup.js";
+export * from "./create-account.js";

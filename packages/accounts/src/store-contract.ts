@@ -80,6 +80,26 @@ export function describeStoreContract(name: string, createHarness: () => Promise
         expect(found?.username).toBe("Khishgee");
       });
 
+      it("round-trips the encrypted key, and leaves it absent when there is none", async () => {
+        // Both implementations must agree, or a key stored against Mongo would
+        // read back as an account with no custody — an expert who cannot sign.
+        const blob = "hvk1$16384$8$1$c2FsdA==$aXYxMjM0NTY3OA==$dGFn$Y2lwaGVy";
+        await store().createAccount({ ...base, encryptedPrivateKey: blob });
+        expect((await store().findByAccountId("0.0.10119624"))?.encryptedPrivateKey).toBe(blob);
+
+        await store().createAccount({
+          ...base,
+          hederaAccountId: "0.0.10119625",
+          emailNormalized: "other@example.com",
+          email: "other@example.com",
+          username: "Other",
+          usernameNormalized: "other",
+        });
+        const brought = await store().findByAccountId("0.0.10119625");
+        expect(brought).not.toBeNull();
+        expect("encryptedPrivateKey" in (brought as object)).toBe(false);
+      });
+
       it("returns null for a miss rather than throwing", async () => {
         expect(await store().findByAccountId("0.0.1")).toBeNull();
         expect(await store().findByEmailNormalized("nobody@example.com")).toBeNull();

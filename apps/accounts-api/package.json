@@ -10,7 +10,8 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@handoff/accounts": "workspace:*"
+    "@handoff/accounts": "workspace:*",
+    "@handoff/chain": "workspace:*"
   },
   "devDependencies": {
     "@handoff/accounts-client": "workspace:*",
