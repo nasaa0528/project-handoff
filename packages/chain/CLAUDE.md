@@ -27,6 +27,9 @@
   "we sent it."
 - **Never touch mainnet.** Not an endpoint, not an account ID, not in a comment.
 - Never let a platform key reach a browser build. This package is server-side only.
+- **Never store a key.** `createTestnetAccount` hands its caller a freshly generated
+  key and keeps nothing. Encrypting it is `packages/accounts`' job, under
+  `docs/decisions/2026-09-12-platform-creates-and-stores-expert-key.md`.
 
 ## `ScheduleCreate` does not work for this escrow — read before touching payout
 
