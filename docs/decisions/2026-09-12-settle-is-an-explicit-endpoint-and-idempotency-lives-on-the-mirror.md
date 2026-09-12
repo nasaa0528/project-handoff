@@ -61,9 +61,10 @@ Three validations decide whether the money moves, and each is there for a rule:
   order to a claimant who never delivered, and defeating the short claim timeout. The
   reader now resolves once on the claims alone and passes `deliveredAt` only when it is
   the first claimant's own and no reopen has happened.
-- **Three questions this leaves open, all `resolveClaims`, all P4's.** None is a
-  regression — each is the treaty's rule behaving as written — and none blocks this
-  change, but they are the same class and belong in one place:
+- **Four questions this leaves open, all `resolveClaims`, all P4's.** The first three are
+  the treaty's rule behaving as written and none blocks this change; the fourth was
+  measured on testnet after this decision was written and is the rule contradicting
+  itself. They are the same class and belong in one place:
   1. A first claimant who delivers late *after* somebody claimed the reopen should win by
      the treaty's rule and does not here. The reader cannot fix it: only `resolveClaims`
      knows which claim won.
@@ -77,6 +78,21 @@ Three validations decide whether the money moves, and each is there for a rule:
      pays only on a matching one. So the order never expires, never pays, and the reopen
      stays shut. The money is already stranded either way — there is no return path — so
      this is not a money-path regression, but it is the same question.
+  4. **A claimant who delivers *on time* loses the order the moment anybody claims the
+     reopen** — measured on testnet 2026-09-12, and not the narrower late case in 1.
+     `resolveWithDelivery` resolves on the claims alone first, so once the wall clock has
+     passed the window `resolveClaims` returns the reopener with `reopened: true`; the
+     guard tests `candidate.reopened` on *that* record, returns early, and never looks up
+     whether the first claimant delivered inside their window. This contradicts
+     `packages/schema/src/claim.ts` — "A delivered claim never expires" — and the
+     consequence above, which reads as though a timely delivery is safe. Order
+     `ord_625a742e59174b5a9f4d6f1d7b42bd4a`: claim seq 47 and reopen claim seq 58 on
+     orders topic `0.0.10421643`, attestation seq 5 on attestations topic `0.0.10421645`
+     12.7 s into an 1800 s window, and the holder still moved to the reopener. The
+     practical damage was contained because the order had already been paid nine seconds
+     after that attestation — the settle path now answers such an order as paid before the
+     holder is consulted, `2026-09-12` — but a platform that is down at sign time has no
+     such protection, which is exactly the recovery the brief promises.
 - **The payout is decided by the claimant's *earliest matching* attestation.** Settling is
   an idempotent retry, so its answer has to be a function of facts that only grow. Taking
   the last let a claimant publish a divergent attestation after being paid and turn every
