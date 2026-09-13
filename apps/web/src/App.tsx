@@ -312,7 +312,8 @@ function Ready({ booted, onDisconnect }: { booted: Booted; onDisconnect: () => v
   const [route, navigate] = useRoute();
   const now = useNow();
   const deps = useMemo(() => booted.deps, [booted]);
-  const signFlow = useSignFlow(deps);
+  // Per order: signing A must not close B's form. See useSignFlow.ts.
+  const signFlows = useSignFlow(deps);
   const claimFlow = useClaimFlow(booted.source, booted.identity.accountId);
 
   const [entries, setEntries] = useState<readonly InboxEntry[] | null>(null);
@@ -560,12 +561,14 @@ function Ready({ booted, onDisconnect }: { booted: Booted; onDisconnect: () => v
         }
         return (
           <WorkspaceScreen
+            // Keyed so a workspace-to-workspace hop starts from that order's own draft.
+            key={route.orderId}
             mode={booted.config.mode}
             identity={booted.identity}
             order={entry.order}
             signBy={claimState.signBy}
             artifactText={documents.get(route.orderId) ?? null}
-            flow={signFlow}
+            flow={signFlows.forOrder(route.orderId)}
             now={now}
             drafts={browserDrafts}
             delivered={entry.delivered}
