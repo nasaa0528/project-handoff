@@ -54,6 +54,36 @@ describe("inbox rows expand", () => {
     expect(busy).toContain("In review");
   });
 
+  it("moves a signed order out of In progress and into Signed, with its verdict and no draft badge", () => {
+    const signed: InboxEntry = {
+      order: order({ title: "Judged already" }),
+      claim: { kind: "yours", claimedAtEpochSeconds: 0, signBy: SIGN_BY },
+      delivered: { signedBy: "0.0.1234", yours: true, verdict: "reject", consensusTimestamp: "1757000000.000000001", sequenceNumber: 7 },
+    };
+    const html = renderToStaticMarkup(<InboxScreen entries={[signed]} now={NOW} onOpen={() => {}} progress={() => "not-started"} />);
+    expect(html).not.toContain("In progress");
+    expect(html).toContain("Signed");
+    expect(html).toContain("Judged already");
+    expect(html).toContain("Published · signed by you");
+    expect(html).toContain("Reject");
+    expect(html).toContain("View");
+    expect(html).not.toContain("Not started");
+    expect(html).not.toContain("Continue");
+    // Money is the workspace's to confirm off the network, never this row's.
+    expect(html).not.toMatch(/\bPaid\b/);
+    expect(expectNoBannedWords(html)).toEqual([]);
+  });
+
+  it("keeps a signed order on screen after its deadline, since a verdict does not expire", () => {
+    const stale: InboxEntry = {
+      order: order({ title: "Old but signed", envelope: { ...order().envelope, deadline: utc(new Date(2026, 8, 1, 12, 0, 0)) } }),
+      claim: { kind: "yours", claimedAtEpochSeconds: 0, signBy: SIGN_BY },
+      delivered: { signedBy: "0.0.1234", yours: true, verdict: "approve", consensusTimestamp: "1757000000.000000001", sequenceNumber: 8 },
+    };
+    const html = renderToStaticMarkup(<InboxScreen entries={[stale]} now={NOW} onOpen={() => {}} />);
+    expect(html).toContain("Old but signed");
+  });
+
   it("lists what the expert claimed and lost, with the holder's window as a time and no queue", () => {
     const lost: InboxEntry = {
       order: order({ title: "Lost this one" }),

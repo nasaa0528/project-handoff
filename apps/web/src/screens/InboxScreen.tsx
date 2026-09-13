@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { CalendarDays, ChevronDown, Clock, FileText } from "lucide-react";
+import { CalendarDays, ChevronDown, Clock, FileText, ShieldCheck } from "lucide-react";
 import { parseTinybars, utcToEpochSeconds } from "@handoff/schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { HashscanLink } from "../components/HashscanLink";
 import { Escrow } from "../components/Money";
 import { Mono } from "../components/Mono";
 import { Skeleton } from "../components/Skeleton";
+import { VERDICT_WORDS } from "../components/VerdictPicker";
 import { claimWindowWords, clockWords, isPast } from "../lib/clock";
 import { askSummary, type ExpertOrder, type InboxEntry } from "../orders/order";
 
@@ -56,7 +57,12 @@ export function InboxScreen({
 
   const nowSeconds = Math.floor(now.getTime() / 1000);
   const live = entries.filter((e) => !isPast(e.order.envelope.deadline, nowSeconds));
-  const mine = live.filter((e) => e.claim.kind === "yours");
+  // Held and still to be judged. A signed order is held too — a delivered
+  // claim never expires — but it is finished work, and lives below.
+  const mine = live.filter((e) => e.claim.kind === "yours" && e.delivered?.yours !== true);
+  // What this expert signed. From every entry, not the live ones: a passed
+  // deadline does not unpublish a verdict.
+  const signed = entries.filter((e) => e.delivered?.yours === true);
   const open = sorted(live.filter((e) => e.claim.kind === "open"), sort);
   // Orders this expert claimed and lost. Not a queue: the holder's window
   // runs out and the order returns to the inbox for anyone, first come.
@@ -130,7 +136,60 @@ export function InboxScreen({
       {lost.length > 0 && (
         <Watching entries={lost} now={now} />
       )}
+
+      {signed.length > 0 && <Signed entries={signed} onOpen={onResume ?? onOpen} />}
     </div>
+  );
+}
+
+/**
+ * What the expert signed. The verdict stands on the topic under their
+ * account, so the row says so and offers to read it back; it never offers to
+ * sign again. Nothing here says paid: that is the workspace's to say, and only
+ * once the payout is read off the network.
+ */
+function Signed({ entries, onOpen }: { entries: readonly InboxEntry[]; onOpen: (orderId: string) => void }) {
+  return (
+    <section className="grid gap-2.5">
+      <SectionLabel>Signed</SectionLabel>
+      <List>
+        {entries.map(({ order, delivered }) => (
+          <li key={order.envelope.order_id} className="border-b border-border last:border-b-0">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-l-[3px] border-l-paid px-5 py-4">
+              <span className="grid min-w-0 flex-1 gap-1">
+                <span className="truncate font-serif text-[15px] font-semibold">{order.title}</span>
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  {delivered !== null && (
+                    <>
+                      <Badge variant="outline" className="border-paid/20 bg-paid/5 text-paid">
+                        {VERDICT_WORDS[delivered.verdict]}
+                      </Badge>
+                      <Dot />
+                    </>
+                  )}
+                  <span className="flex items-center gap-1 whitespace-nowrap">
+                    <ShieldCheck className="size-3 text-paid" aria-hidden />
+                    Published · signed by you
+                  </span>
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-4">
+                <Escrow priceTinybars={order.envelope.price_tinybars} />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 rounded-lg px-4 text-[13px] font-semibold"
+                  onClick={() => onOpen(order.envelope.order_id)}
+                >
+                  View
+                </Button>
+              </span>
+            </div>
+          </li>
+        ))}
+      </List>
+    </section>
   );
 }
 

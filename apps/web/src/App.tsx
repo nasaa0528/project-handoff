@@ -417,9 +417,11 @@ function Ready({ booted, onDisconnect }: { booted: Booted; onDisconnect: () => v
   // The rate is a public, key-free read of Hedera's own fee rate. The mock
   // fabricates ids, not exchange rates, so it reads the same place.
   const mirrorNodeUrl = booted.config.mode === "testnet" ? booted.config.mirrorNodeUrl : DEFAULT_MIRROR_NODE_URL;
-  const held = signFlow.status.kind === "signing" || claimFlow.status.kind === "confirming";
+  const held = signFlows.anySigning || claimFlow.status.kind === "confirming";
   const body = renderRoute();
-  const openCount = entries === null ? null : entries.filter((e) => e.claim.kind === "open" || e.claim.kind === "yours").length;
+  // Work still to do: open, or held and not yet signed. A signed order is done.
+  const openCount =
+    entries === null ? null : entries.filter((e) => e.claim.kind === "open" || (e.claim.kind === "yours" && e.delivered?.yours !== true)).length;
 
   return (
     // The rate wraps the whole frame: the navbar shows a balance too, and an
