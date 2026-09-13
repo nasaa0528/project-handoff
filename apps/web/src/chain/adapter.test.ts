@@ -38,12 +38,18 @@ function testnetConnection(key: SecretKey, accountPublicKey: string | null = nul
 }
 
 describe("createWebChain", () => {
-  it("on the mock, signs as the connected account and exposes the whole adapter once, as the mock", () => {
+  it("on the mock, signs as the connected account and exposes the whole adapter, as the mock", async () => {
     const web = createWebChain(mockConfig, { mode: "mock", accountId: ACCOUNT });
     expect(web.mode).toBe("mock");
     expect(web.expertAccountId).toBe(ACCOUNT);
     if (web.mode !== "mock") throw new Error("unreachable");
-    expect(web.mock).toBe(web.chain);
+    // What the expert's chain publishes is the expert's: the payer on the
+    // topic is the connected account, not the adapter's stand-in, or the inbox
+    // would never see the expert's own verdict as theirs.
+    await web.chain.submitMessage("MOCK-topic", "hello");
+    const [message] = await web.mock.readMessages("MOCK-topic");
+    expect(message?.payerAccountId).toBe(ACCOUNT);
+    expect(await web.chain.readMessages("MOCK-topic")).toHaveLength(1);
     expect(() => web.disconnect()).not.toThrow();
     expect(() => web.disconnect()).not.toThrow();
   });

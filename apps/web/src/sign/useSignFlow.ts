@@ -3,9 +3,15 @@
  * in one place: sign, then watch settlement, then offer a retry if the mirror
  * node goes quiet. The chain work itself lives in `runSign.ts` and
  * `settlement.ts`, which have no React in them and are tested without it.
+ *
+ * The state is the order's, not the session's. One hook serves every
+ * workspace the expert opens, so it keeps a status per order id: a verdict
+ * signed on order A is "signed" for A, and A alone. It was one status for the
+ * whole session once, and after the first sign every later claim opened on
+ * A's receipt instead of its own form, until a reload forgot it.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   describeError,
   runSign,
@@ -37,6 +43,7 @@ export interface SignFlowDeps extends SignRunDeps {
   readonly locatePayout: (order: OrderForSigning, signed: SignedAttestation) => PayoutLocator;
 }
 
+/** One order's sign state, as the workspace consumes it. */
 export interface SignFlow {
   readonly status: SignStatus;
   readonly settlement: SettlementState | null;
@@ -47,19 +54,43 @@ export interface SignFlow {
   readonly checkAgain: () => void;
 }
 
-export function useSignFlow(deps: SignFlowDeps): SignFlow {
-  const [status, setStatus] = useState<SignStatus>({ kind: "idle" });
-  const [settlement, setSettlement] = useState<SettlementState | null>(null);
-  const [platformIssue, setPlatformIssue] = useState<string | null>(null);
-  const watching = useRef<AbortController | null>(null);
-  const lastOrder = useRef<OrderForSigning | null>(null);
+/** Every order's sign state, keyed by order id. */
+export interface SignFlows {
+  /** The flow for one order. Idle for an order nothing has happened to. */
+  readonly forOrder: (orderId: string) => SignFlow;
+  /** Whether any order is mid-sign. Disconnecting then would strand a publish. */
+  readonly anySigning: boolean;
+}
 
-  const stopWatching = useCallback(() => {
-    watching.current?.abort();
-    watching.current = null;
+interface OrderSignState {
+  readonly status: SignStatus;
+  readonly settlement: SettlementState | null;
+  readonly platformIssue: string | null;
+}
+
+const IDLE: OrderSignState = { status: { kind: "idle" }, settlement: null, platformIssue: null };
+
+export function useSignFlow(deps: SignFlowDeps): SignFlows {
+  const [states, setStates] = useState<ReadonlyMap<string, OrderSignState>>(new Map());
+  const watching = useRef(new Map<string, AbortController>());
+  const lastOrder = useRef(new Map<string, OrderForSigning>());
+
+  const patch = useCallback((orderId: string, change: Partial<OrderSignState>) => {
+    setStates((current) => new Map(current).set(orderId, { ...(current.get(orderId) ?? IDLE), ...change }));
   }, []);
 
-  useEffect(() => stopWatching, [stopWatching]);
+  const stopWatching = useCallback((orderId: string) => {
+    watching.current.get(orderId)?.abort();
+    watching.current.delete(orderId);
+  }, []);
+
+  useEffect(() => {
+    const all = watching.current;
+    return () => {
+      for (const controller of all.values()) controller.abort();
+      all.clear();
+    };
+  }, []);
 
   const watch = useCallback(
     (
@@ -67,9 +98,10 @@ export function useSignFlow(deps: SignFlowDeps): SignFlow {
       signed: SignedAttestation,
       resumeFrom?: SettlementState,
     ) => {
-      stopWatching();
+      const orderId = order.envelope.order_id;
+      stopWatching(orderId);
       const controller = new AbortController();
-      watching.current = controller;
+      watching.current.set(orderId, controller);
 
       // The watcher emits its starting state synchronously, so the screen has
       // something to render before the first read.
@@ -80,50 +112,60 @@ export function useSignFlow(deps: SignFlowDeps): SignFlow {
         signal: controller.signal,
         ...(resumeFrom === undefined ? {} : { resumeFrom }),
         onChange: (state) => {
-          if (!controller.signal.aborted) setSettlement(state);
+          if (!controller.signal.aborted) patch(orderId, { settlement: state });
         },
       }).catch((error: unknown) => {
         // The loop treats a rejected read as "not yet", so this is a bug
         // rather than a mirror-node outage. Stall with the message, which
         // puts the retry on screen instead of a spinner.
         if (controller.signal.aborted) return;
-        setSettlement((current) =>
-          current === null
-            ? null
-            : {
-                ...current,
-                phase: "stalled",
-                lastReadError: describeError(error),
-              },
-        );
+        setStates((current) => {
+          const state = current.get(orderId);
+          if (state === undefined || state.settlement === null) return current;
+          return new Map(current).set(orderId, {
+            ...state,
+            settlement: { ...state.settlement, phase: "stalled", lastReadError: describeError(error) },
+          });
+        });
       });
     },
-    [deps, stopWatching],
+    [deps, patch, stopWatching],
   );
 
   const sign = useCallback(
     async (request: SignRequest) => {
-      setStatus({ kind: "signing" });
-
-      setPlatformIssue(null);
-      lastOrder.current = request.order;
+      const orderId = request.order.envelope.order_id;
+      patch(orderId, { status: { kind: "signing" }, platformIssue: null });
+      lastOrder.current.set(orderId, request.order);
       await runSign(request, deps, {
         onSigned: (signed) => {
-          setStatus({ kind: "signed", signed });
+          patch(orderId, { status: { kind: "signed", signed } });
           watch(request.order, signed);
         },
-        onPublishFailed: (message) => setStatus({ kind: "error", message }),
-        onPlatformIssue: setPlatformIssue,
+        onPublishFailed: (message) => patch(orderId, { status: { kind: "error", message } }),
+        onPlatformIssue: (issue) => patch(orderId, { platformIssue: issue }),
       });
     },
-    [deps, watch],
+    [deps, patch, watch],
   );
 
-  const checkAgain = useCallback(() => {
-    if (status.kind === "signed" && lastOrder.current !== null) {
-      watch(lastOrder.current, status.signed, settlement ?? undefined);
-    }
-  }, [status, settlement, watch]);
-
-  return { status, settlement, platformIssue, sign, checkAgain };
+  return useMemo<SignFlows>(
+    () => ({
+      anySigning: [...states.values()].some((s) => s.status.kind === "signing"),
+      forOrder: (orderId) => {
+        const state = states.get(orderId) ?? IDLE;
+        return {
+          ...state,
+          sign,
+          checkAgain: () => {
+            const order = lastOrder.current.get(orderId);
+            if (state.status.kind === "signed" && order !== undefined) {
+              watch(order, state.status.signed, state.settlement ?? undefined);
+            }
+          },
+        };
+      },
+    }),
+    [states, sign, watch],
+  );
 }
