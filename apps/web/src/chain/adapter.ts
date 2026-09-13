@@ -60,10 +60,20 @@ export function createWebChain(config: WebChainConfig, connection: ExpertConnect
   switch (connection.mode) {
     case "mock": {
       const mock = new MockChainAdapter();
+      // The expert's chain signs as the expert, so what it publishes is paid
+      // by the expert's account. The bare adapter stamps "MOCK-payer", and a
+      // verdict paid by nobody in particular is nobody's verdict: the inbox
+      // never saw a signed order as signed on the mock.
+      const chain: ExpertChain = {
+        network: mock.network,
+        readMessages: (topicId, options) => mock.readMessages(topicId, options),
+        getTransaction: (transactionId) => mock.getTransaction(transactionId),
+        submitMessage: (topicId, contents) => mock.publishClaim(topicId, connection.accountId, contents),
+      };
       return {
         mode: "mock",
         expertAccountId: connection.accountId,
-        chain: mock,
+        chain,
         mock,
         content: new InMemoryContentStore(),
         disconnect() {},
